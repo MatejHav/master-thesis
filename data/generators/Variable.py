@@ -19,7 +19,7 @@ class Variable(Value):
 
     def get_value(self):
         if not self.evaluated:
-            self.value = self.f(map(lambda x: x.get_value(), self.parents))
+            self.value = self.f(list(map(lambda x: x.get_value(), self.parents)))
         return self.value
 
     def __str__(self):
