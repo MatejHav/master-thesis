@@ -8,6 +8,9 @@ class Value:
     def get_value(self):
         return self.value
 
+    def reset(self):
+        return
+
     def __call__(self):
         return self.get_value()
 

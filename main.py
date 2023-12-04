@@ -31,16 +31,22 @@ if __name__ == '__main__':
     Xs8 = Constant(0, is_continuous=True, range=(0, 1), generator=lambda: np.random.rand())
     S4 = State(lambda _: [Xs7, Xs8], -1)
     # MDP
-    mdp = MDP("Test MDP")
-    mdp.add_states([S1, S2, S3])
+    mdp = MDP("Test MDP", 2, 1)
+    mdp.add_states([S1, S2, S3, S4])
     mdp.add_transition(S1, L, S2, lambda _: 1)
     mdp.add_transition(S2, L, S2, lambda _: 1)
     mdp.add_transition(S1, R, S3, lambda _: 0.5)
     mdp.add_transition(S1, R, S1, lambda _: 0.25)
     mdp.add_transition(S1, R, S4, lambda _: 0.25)
-    # Test
-    print(mdp.perform_action(S1, L, human_features))
-    print(mdp.perform_action(S1, R, human_features))
-    print(*mdp.perform_actions(S1, [R], human_features))
-    print(*mdp.perform_actions(S1, [L, L, L, L], human_features))
+    mdp.add_transition(S2, R, S2, lambda _: 1)
+    mdp.add_transition(S3, L, S3, lambda _: 1)
+    mdp.add_transition(S3, R, S3, lambda _: 1)
+    mdp.add_transition(S4, L, S4, lambda _: 1)
+    mdp.add_transition(S4, R, S4, lambda _: 1)
+    # Generator
+    generator = Generator(mdp, human_features)
+    table = generator.generate_uniform_data(10000, 50, lambda _: S1, 50)
+    print(table)
+
+
 

@@ -1,6 +1,7 @@
 from collections import defaultdict
 from data.generators.Abstract import *
 
+
 class Action:
     def __init__(self, a: List[Value]):
         self.a = a
@@ -10,6 +11,7 @@ class Action:
 
     def __repr__(self):
         return self.__str__()
+
 
 class State:
     def __init__(self, X: Callable[Action, List[Value]], reward: float):
@@ -37,8 +39,10 @@ class State:
 
 class MDP:
 
-    def __init__(self, name: str):
+    def __init__(self, name: str, state_size: int, action_size: int):
         self.name = name
+        self.state_size = state_size
+        self.action_size = action_size
         self.S: Set[State] = set()
         self.T: Dict[State, Dict[Action, Dict[State, Callable[List[Value], float]]]] = dict()
 
@@ -55,6 +59,7 @@ class MDP:
         return res
 
     def add_transition(self, from_state: State, action: Action, to_state: State, p: Callable[List[Value], float]):
+        assert len(action.a) == self.action_size, f"Actions in MDP {self.name} have to be of size {self.action_size}"
         if from_state not in self.T:
             self.T[from_state] = dict()
         if action not in self.T[from_state]:
@@ -80,3 +85,6 @@ class MDP:
             state = self.perform_action(state, action, x)
             history.append((state, action))
         return history
+
+    def __str__(self):
+        return f"MDP({self.name})"
