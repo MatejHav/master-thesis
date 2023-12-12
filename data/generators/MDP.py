@@ -14,24 +14,19 @@ class Action:
 
 
 class State:
-    def __init__(self, X: Callable[Action, List[Value]], reward: float):
+    def __init__(self, X: Callable[[Action], List[Value]], reward: float, is_terminal: bool=False):
         self.X = X
         self.R = reward
+        self.terminal = is_terminal
 
     def __hash__(self):
         return id(self)
 
     def __eq__(self, other):
-        if type(self) != type(other):
-            return False
-        # TODO compare using numpy
-        for i in range(len(self.X)):
-            if self.X[i] != other.X[i]:
-                return False
-        return True
+        return id(self) == id(other)
 
     def __str__(self):
-        return f"State([todo], {self.R})"
+        return f"State({self.R})"
 
     def __repr__(self):
         return self.__str__()
@@ -58,7 +53,8 @@ class MDP:
             res = self.add_state(state) & res
         return res
 
-    def add_transition(self, from_state: State, action: Action, to_state: State, p: Callable[List[Value], float]):
+    def add_transition(self, from_state: State, action: Action, to_state: State, p: Callable[[List[Value]], float]):
+        assert not from_state.terminal, f"State {from_state} is terminal, thus cannot have actions going out."
         assert len(action.a) == self.action_size, f"Actions in MDP {self.name} have to be of size {self.action_size}"
         if from_state not in self.T:
             self.T[from_state] = dict()
@@ -66,12 +62,14 @@ class MDP:
             self.T[from_state][action] = dict()
         self.T[from_state][action][to_state] = p
 
-    def get_actions(self, state: State) -> Dict[Action, Dict[State, Callable[List[Value], float]]]:
+    def get_actions(self, state: State) -> Dict[Action, Dict[State, Callable[[List[Value]], float]]]:
         if state not in self.T:
             return dict()
         return self.T[state]
 
-    def perform_action(self, state: State, action: Action, x: List[Value]) -> State:
+    def perform_action(self, state: State, action: Action, x: List[Value]) -> Optional[State]:
+        if state.terminal:
+            return None
         if state not in self.T:
             raise RuntimeError(f"State {state} is a Terminal state.")
         if action not in self.T[state]:
@@ -83,6 +81,8 @@ class MDP:
         history = [(state, None)]
         for action in actions:
             state = self.perform_action(state, action, x)
+            if state is None:
+                return history
             history.append((state, action))
         return history
 

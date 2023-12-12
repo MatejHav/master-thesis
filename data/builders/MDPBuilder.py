@@ -1,7 +1,7 @@
 import math
 
+from typing import *
 from data.builders import *
-
 from data.generators import *
 
 
@@ -11,6 +11,9 @@ class MDPBuilder:
         self.mdp = MDP(mdp_name, state_size, action_size)
         self.states = dict()
         self.actions = dict()
+
+    def get_state(self, name: str) -> State:
+        return self.states[name]
 
     def add_action(self, name: str, a: List[Value]) -> Self:
         assert name not in self.actions, f"Action {name} already exists!"
@@ -112,6 +115,11 @@ class MDPBuilder:
         assert name not in self.states, f"State {name} already exists!"
         self.states[name] = state
         self.mdp.add_state(state)
+        return self
+
+    def connect_self_with_actions(self, state: str, actions: List[str], p_lambdas: List[Callable]):
+        for index, action in enumerate(actions):
+            self.connect_states(state, state, action, p_lambdas[index])
         return self
 
     def build(self) -> MDP:

@@ -10,9 +10,6 @@ class Variable(Value):
         self.f = f
 
     def reset(self):
-        if not self.evaluated:
-            print("Trying to reset a variable that was not evaluated!")
-            return
         self.evaluated = False
         for parent in self.parents:
             parent.reset()
@@ -20,6 +17,7 @@ class Variable(Value):
     def get_value(self):
         if not self.evaluated:
             self.value = self.f(list(map(lambda x: x.get_value(), self.parents)))
+            self.evaluated = True
         return self.value
 
     def __str__(self):

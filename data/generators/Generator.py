@@ -11,7 +11,7 @@ class Generator:
         self.mdp = mdp
         self.x = x
 
-    def generate_uniform_data(self, num_of_rows: int, n_jobs: int, starting_state: Callable[List[Value], State], max_iter: int=100):
+    def generate_uniform_data(self, num_of_rows: int, n_jobs: int, starting_state: Callable[[List[Value]], State], max_iter: int=100, verbose: int=1):
         rows_per_thread = [num_of_rows // n_jobs for _ in range(n_jobs)]
         remainder = num_of_rows % n_jobs
         for i in range(n_jobs):
@@ -28,13 +28,14 @@ class Generator:
         result_table = []
 
         def thread_helper(num_of_rows, thread_num):
-            bar = tqdm(range(num_of_rows))
-            bar.set_description(f"[THREAD {thread_num}]")
+            bar = range(num_of_rows)
+            if verbose >= 1:
+                bar = tqdm(range(num_of_rows))
+                bar.set_description(f"[THREAD {thread_num}]")
             for i in bar:
                 c = 0
                 x = [X() for X in self.x]
                 state = starting_state(self.x)
-                map(lambda X: X.reset(), self.x)
                 while state is not None and c <= max_iter:
                     pos_actions = list(self.mdp.get_actions(state).keys())
                     if len(pos_actions) == 0:
@@ -53,6 +54,7 @@ class Generator:
                     result_table.append(row)
                     c += 1
                     state = self.mdp.perform_action(state, A, self.x)
+                list(map(lambda X: X.reset(), self.x))
 
         threads = []
         for job in range(n_jobs):
