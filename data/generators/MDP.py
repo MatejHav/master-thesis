@@ -1,5 +1,6 @@
 from collections import defaultdict
 from data.generators.Abstract import *
+from torch import Tensor
 
 
 class Action:
@@ -14,13 +15,16 @@ class Action:
 
 
 class State:
-    def __init__(self, X: Callable[[Action], List[Value]], reward: float, is_terminal: bool=False):
+    def __init__(self, X: List[Value], reward: float, is_terminal: bool=False):
         self.X = X
         self.R = reward
         self.terminal = is_terminal
 
     def __hash__(self):
         return id(self)
+
+    def __call__(self, *args, **kwargs) -> Tensor:
+        return Tensor([x() for x in self.X])
 
     def __eq__(self, other):
         return id(self) == id(other)
@@ -68,12 +72,12 @@ class MDP:
         return self.T[state]
 
     def perform_action(self, state: State, action: Action, x: List[Value]) -> Optional[State]:
-        if state.terminal:
+        if state.terminal or action is None:
             return None
         if state not in self.T:
             raise RuntimeError(f"State {state} is a Terminal state.")
         if action not in self.T[state]:
-            raise RuntimeError(f"Action {action} not possible from state {state}.")
+            return state
         possible_outcomes = self.T[state][action]
         return np.random.choice(list(possible_outcomes.keys()), p=list(map(lambda f: f(x), possible_outcomes.values())))
 

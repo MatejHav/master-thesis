@@ -21,10 +21,12 @@ class Generator:
             remainder -= 1
         columns = [f"X{i}" for i in range(len(self.x))]
         columns.append("ID")
-        columns.extend([f"S{i}" for i in range(self.mdp.state_size)])
         columns.append("T")
-        columns.append("R")
+        columns.extend([f"S{i}" for i in range(self.mdp.state_size)])
         columns.extend([f"A{i}" for i in range(self.mdp.action_size)])
+        columns.extend([f"S'{i}" for i in range(self.mdp.state_size)])
+        columns.append("R")
+        columns.append("TERMINAL")
         result_table = []
 
         def thread_helper(num_of_rows, thread_num):
@@ -43,17 +45,23 @@ class Generator:
                     A = np.random.choice(pos_actions)
                     row = x.copy()
                     row.append(i)
-                    for s in state.X(A):
+                    row.append(c)
+                    for s in state.X:
                         row.append(s())
                         s.reset()
-                    row.append(c)
-                    row.append(state.R)
                     for a in A.a:
                         row.append(a())
                         a.reset()
-                    result_table.append(row)
                     c += 1
                     state = self.mdp.perform_action(state, A, self.x)
+                    if state is None:
+                        break
+                    for s in state.X:
+                        row.append(s())
+                        s.reset()
+                    row.append(state.R)
+                    row.append(state.terminal)
+                    result_table.append(row)
                 list(map(lambda X: X.reset(), self.x))
 
         threads = []
