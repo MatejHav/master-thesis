@@ -23,11 +23,12 @@ class Experiment:
             t_max = current["T"].max()
             for t in range(t_max):
                 curr_temp = current[current["T"] == t].iloc[0]
-                self.agent.learn(state=Tensor(curr_temp[state_ids].astype(float)),
+                loss = self.agent.learn(state=Tensor(curr_temp[state_ids].astype(float)),
                                  action=Tensor(curr_temp[action_ids].astype(float)),
                                  next_state=Tensor(curr_temp[next_state_ids].astype(float)),
                                  reward=curr_temp["R"],
                                  terminal=curr_temp["TERMINAL"])
+        return loss
 
     def evaluate_episode(self, mdp: MDP, start_state: State, actions: List[Action], X: List[Value], max_iter:int = 100):
         state = start_state

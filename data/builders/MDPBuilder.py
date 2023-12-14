@@ -24,7 +24,7 @@ class MDPBuilder:
 
     def add_constant_discrete_state(self, name: str, values: List[Any], reward: float, terminal: bool=False) -> Self:
         assert name not in self.states, f"State {name} already exists!"
-        state = State([Constant(values[i], is_continuous=False) for i in range(self.mdp.state_size)], reward, is_terminal=terminal)
+        state = State([Constant(values[i], is_continuous=False) for i in range(self.mdp.state_size)], reward, is_terminal=terminal, name=name)
         self.states[name] = state
         self.mdp.add_state(state)
         return self
@@ -38,7 +38,7 @@ class MDPBuilder:
                                           generator=lambda: ranges[i][0] + (
                                                       ranges[i][1] - ranges[i][0]) * np.random.rand()) for i in
                                  range(self.mdp.state_size)],
-                      reward)
+                      reward, name=name)
         self.states[name] = state
         self.mdp.add_state(state)
         return self
@@ -51,7 +51,7 @@ class MDPBuilder:
                                           is_continuous=True,
                                           generator=lambda: means[i] + stds[i] * np.random.randn()) for i
                                  in range(self.mdp.state_size)],
-                      reward)
+                      reward, name=name)
         self.states[name] = state
         self.mdp.add_state(state)
         return self
@@ -69,7 +69,7 @@ class MDPBuilder:
                                                       ranges[i][1] - ranges[i][0]) * np.random.rand()))
             else:
                 constants.append(Constant(ranges[i][0], is_continuous=False))
-        state = State(constants, reward)
+        state = State(constants, reward, name=name)
         self.states[name] = state
         self.mdp.add_state(state)
         return self
@@ -115,6 +115,7 @@ class MDPBuilder:
 
     def add_custom_state(self, name: str, state: State) -> Self:
         assert name not in self.states, f"State {name} already exists!"
+        assert name == state.name, f"State.name and Builder name should be consistent."
         self.states[name] = state
         self.mdp.add_state(state)
         return self

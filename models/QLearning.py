@@ -29,3 +29,4 @@ class QLearningAgent(Agent):
         loss.backward()
         self.optimizer.step()
         self.optimizer.zero_grad()
+        return loss.item()

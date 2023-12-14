@@ -1,6 +1,11 @@
+import math
 from collections import defaultdict
+
+import numpy as np
+
 from data.generators.Abstract import *
 from torch import Tensor
+import tkinter
 
 
 class Action:
@@ -15,10 +20,11 @@ class Action:
 
 
 class State:
-    def __init__(self, X: List[Value], reward: float, is_terminal: bool=False):
+    def __init__(self, X: List[Value], reward: float, is_terminal: bool = False, name: str="State"):
         self.X = X
         self.R = reward
         self.terminal = is_terminal
+        self.name = name
 
     def __hash__(self):
         return id(self)
@@ -30,7 +36,7 @@ class State:
         return id(self) == id(other)
 
     def __str__(self):
-        return f"State({self.R})"
+        return f"State({self.name})"
 
     def __repr__(self):
         return self.__str__()
@@ -89,6 +95,61 @@ class MDP:
                 return history
             history.append((state, action))
         return history
+
+    def visualize(self, repulsion_strength: float = 20, spring_stregth: float = 0.1, max_iter: int = 1000):
+        width = 500
+        height = 500
+        radius = 15
+        points = []
+        index_to_state = dict()
+        state_to_index = dict()
+        num_of_rows = 5
+        num_of_cols = len(self.S) // num_of_rows + 1
+        for index, state in enumerate(self.S):
+            row = index // num_of_rows
+            col = index % num_of_cols
+            point = np.array([(row / num_of_rows) * width, (col / num_of_cols) * height])
+            index_to_state[index] = state
+            state_to_index[state] = index
+            points.append(point)
+        c = 0
+        spring_length = 100
+        total_energy = math.inf
+        minimum_energy = 1000
+        while c < max_iter and minimum_energy < total_energy:
+            total_energy = 0
+            for index, point in enumerate(points):
+                diff = np.zeros((2,))
+                for j, other in enumerate(points):
+                    if index == j:
+                        continue
+                    diff += repulsion_strength / (np.linalg.norm(point - other)**2) * (other - point) / np.linalg.norm(point - other)
+                other_ids = set()
+                if index_to_state[index] in self.T:
+                    for other_state in map(lambda d: d.keys(), self.T[index_to_state[index]].values()):
+                        for state in other_state:
+                            if state_to_index[state] == index:
+                                continue
+                            other_ids.add(state_to_index[state])
+                for j in other_ids:
+                    other = points[j]
+                    diff += spring_stregth * abs(np.linalg.norm(point - other) - spring_length) * (point - other) / np.linalg.norm(point - other)
+                points[index] += diff
+                total_energy += np.linalg.norm(diff)
+            c += 1
+        min_x = min([point[0] for point in points]) - 2 * radius
+        max_x = max([point[0] for point in points]) + 2 * radius
+        min_y = min([point[1] for point in points]) - 2 * radius
+        max_y = max([point[1] for point in points]) + 2 * radius
+        for index, point in enumerate(points):
+            points[index] = np.array([(point[0] - min_x) / (max_x - min_x) * width, (point[1] - min_y) / (max_y - min_y) * height])
+        root = tkinter.Tk()
+        canvas = tkinter.Canvas(root, width=width, height=height)
+        for index, point in enumerate(points):
+            canvas.create_oval(point[0]-radius, point[1]-radius, point[0]+radius, point[1]+radius)
+            canvas.create_text(point[0], point[1], text=index_to_state[index].name)
+        canvas.pack()
+        root.mainloop()
 
     def __str__(self):
         return f"MDP({self.name})"
