@@ -20,11 +20,12 @@ class QLearningAgent(Agent):
         self.optimizer = torch.optim.Adam(self.q.parameters())
 
     def choose(self, state: Tensor) -> int:
-        return self.q(state).argmax()
+        print(state, self.q(state))
+        return self.q(state).argmax().item()
 
     def learn(self, state: Tensor, action: Tensor, next_state: Tensor, reward: float, terminal: bool):
         action_id = self.actions.index(action)
-        next_q_value = torch.zeros(len(self.actions)) if terminal else self.q(next_state)
+        next_q_value = torch.zeros_like(self.q(next_state)) if terminal else self.q(next_state)
         loss = self.loss(reward + self.gamma * next_q_value.max(), self.q(state)[action_id])
         loss.backward()
         self.optimizer.step()
