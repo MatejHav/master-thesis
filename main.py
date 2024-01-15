@@ -11,31 +11,31 @@ if __name__ == '__main__':
     # default_r = -0.01
     # max_r = 10
     # p = 0.2
-    mdp_builder, mdp = build_basic_mdp()
+    mdp_builder, mdp = build_4x4_blank_mdp()
     # mdp.visualize(max_iter=100)
     # Human
-    # F1 = Function(lambda: np.random.rand() / 4)
-    # X1 = Variable(F1)
-    X1 = Constant(0.5, is_continuous=False)
+    F1 = Function(lambda: np.random.rand())
+    X1 = Variable(F1)
+    # X1 = Constant(0.5, is_continuous=True)
     human_features = [X1]
     # Generator
     generator = Generator(mdp, human_features)
-    path = "basic_maze_data.csv"
-    df = generator.generate_uniform_data(num_of_rows=200, n_jobs=10,
-                                         starting_state=lambda _: mdp_builder.get_state("S(0, 0)"), max_iter=5,
+    path = "4x4_maze_data.csv"
+    df = generator.generate_uniform_data(num_of_rows=2000, n_jobs=10,
+                                         starting_state=lambda _: mdp_builder.get_state("S(0, 0)"), max_iter=25,
                                          verbose=1)
     df.to_csv(path)
-    max_epochs = 70
+    max_epochs = 200
     action_list = mdp_builder.action_list
     print(action_list)
     experiment = Experiment(state_size=3, action_size=1, pos_actions=action_list, x_size=1, gamma=0.5)
     means = []
     losses = []
     for epoch in range(max_epochs):
-        print(epoch)
         loss = experiment.train(path, verbose=0)
+        print(epoch, loss)
         losses.append(loss)
-        res = experiment.evaluate(mdp, mdp_builder.get_state("S(0, 0)"), action_list, human_features, num_of_episodes=1, max_iter=5)
+        res = experiment.evaluate(mdp, mdp_builder.get_state("S(0, 0)"), action_list, human_features, num_of_episodes=1, max_iter=25)
         means.append(np.mean(res))
     plt.plot(means)
     plt.title("Average return with learned policy")

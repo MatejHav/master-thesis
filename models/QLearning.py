@@ -20,7 +20,6 @@ class QLearningAgent(Agent):
         self.optimizer = torch.optim.Adam(self.q.parameters())
 
     def choose(self, state: Tensor) -> int:
-        print(state, self.q(state))
         return self.q(state).argmax().item()
 
     def learn(self, state: Tensor, action: Tensor, next_state: Tensor, reward: float, terminal: bool):

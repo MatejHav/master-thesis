@@ -54,7 +54,7 @@ class Experiment:
             if state is None:
                 break
             c += 1
-        print(s)
+        # print(s)
         [x.reset() for x in X]
         self.res.append(cum_r)
 
