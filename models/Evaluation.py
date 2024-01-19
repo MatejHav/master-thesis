@@ -1,9 +1,31 @@
+from typing import Dict
+
 import pandas as pd
+import sys
+
+import torch
 
 from models import *
 from models import Agent
 
 from pyomo.environ import *
+from collections import defaultdict
+
+from pyutilib.services import register_executable, registered_executable
+
+register_executable(name='glpsol')
+
+
+def create_feature_dict(state_features: List[str], action_features: List[str],
+                        confounder_features: List[str], state_action_features: List[str],
+                        next_state_features: List[str]):
+    return {
+        "state_features": state_features,
+        "action_features": action_features,
+        "confounder_features": confounder_features,
+        "state_action_features": state_action_features,
+        "next_state_features": next_state_features
+    }
 
 
 class Evaluator:
@@ -13,15 +35,71 @@ class Evaluator:
         self.delta1 = behavioral_policy_delta
         self.delta2 = transitional_delta
 
-    def find_mdp(self, transition_set: pd.DataFrame, start_state:int) -> float:
-        model = ConcreteModel()
+    def find_mdp(self, transition_set: pd.DataFrame, feature_dict: Dict[str, List[str]], agent: Agent,
+                 state_set: pd.DataFrame, action_set: pd.DataFrame, max_depth: int = 100) -> float:
+
+        # Cluster states together based on state-action pairs
+        row2index = defaultdict(list)
+        index2group = dict()
+        indexer = dict()
         for index, row in transition_set.iterrows():
-            model.add_component(f"P({index})", Var(initialize=row['t_middle'], bounds=(row['t_lower'], row['t_upper'])))
+            state_values = tuple(row[feature_dict["state_features"]].tolist())
+            action_values = tuple(row[feature_dict["action_features"]].tolist())
+            next_state_values = tuple(row[feature_dict["next_state_features"]].tolist())
+            row2index[state_values].append(index)
+            index2group[index] = row2index[state_values]
+            if state_values not in indexer:
+                indexer[state_values] = dict()
+            if action_values not in indexer[state_values]:
+                indexer[state_values][action_values] = dict()
+            indexer[state_values][action_values][next_state_values] = index
 
-        # Constraint 1: Transitions sum up to 1
-        
-        return 0.0
+        state2id = dict()
+        for index, row in state_set.iterrows():
+            state_values = tuple(row[feature_dict["state_features"]].tolist())
+            state2id[state_values] = index
 
+        model = ConcreteModel()
+        model.T = RangeSet(0, len(transition_set) - 1)
+        model.S = RangeSet(0, len(state_set) - 1)
+        model.P = Var(model.T)
+        model.V = Var(model.S)
+
+        # Constraint 1: Transitions are withing expected bounds
+        def bound_constraint(model, i):
+            return (transition_set.iloc[i]["t_lower"], model.P[i], transition_set.iloc[i]["t_upper"])
+
+        model.c1 = Constraint(model.T, rule=bound_constraint)
+
+        # Constraint 2: Transition probabilities sum up to 1
+        def probability_sum_constraint(model, i):
+            return sum([model.P[j] for j in index2group[i]]) == 1
+
+        model.c2 = Constraint(model.T, rule=probability_sum_constraint)
+
+        # Constraint 3: Value function definition
+        def value_function_constraint(model, i):
+            # Extract state values
+            row = state_set.iloc[i]
+            state_values = row[feature_dict["state_features"]]
+            # Get policy from state i (list of probabilities for each action)
+            prob = agent.policy(torch.Tensor(state_values))
+            for action_id in range(len(prob)):
+                # Get possible resulting states from current states after taking action A
+                next_lookup = transition_set[
+                    np.all(transition_set[feature_dict["state_features"]] == state_values, axis=1)
+                    & np.all(transition_set[feature_dict["action_features"]] == action_set.iloc[action_id], axis=1)]
+                
+
+        # model.c3 = Constraint(model.S, rule=value_function_constraint)
+
+        # Objective: V(s_0)
+        model.OBJ = Objective(sum(model.V))
+
+        opt = SolverFactory('mindtpy')
+        res = opt.solve(model)
+        print('done')
+        return res
 
     def evaluate(self, data_path: str, agent: Agent, gamma: float, include_confounder: bool = True) -> float:
         assert gamma >= 1, "Gamma must be >= 1"
@@ -42,10 +120,14 @@ class Evaluator:
         horizon_set = df[state_action_features]
         horizon_set = horizon_set.groupby(horizon_set.columns.tolist(), as_index=False).size()
         next_horizon_set = df[next_state_features]
-        next_horizon_set: pd.DataFrame = next_horizon_set.groupby(next_horizon_set.columns.tolist(), as_index=False).size()
-        next_horizon_set.insert(len(next_horizon_set.columns), "t_lower", [0 for _ in range(len(next_horizon_set))], True)
-        next_horizon_set.insert(len(next_horizon_set.columns), "t_upper", [1 for _ in range(len(next_horizon_set))], True)
-        next_horizon_set.insert(len(next_horizon_set.columns), "t_middle", [0.5 for _ in range(len(next_horizon_set))], True)
+        next_horizon_set: pd.DataFrame = next_horizon_set.groupby(next_horizon_set.columns.tolist(),
+                                                                  as_index=False).size()
+        next_horizon_set.insert(len(next_horizon_set.columns), "t_lower", [0 for _ in range(len(next_horizon_set))],
+                                True)
+        next_horizon_set.insert(len(next_horizon_set.columns), "t_upper", [1 for _ in range(len(next_horizon_set))],
+                                True)
+        next_horizon_set.insert(len(next_horizon_set.columns), "t_middle", [0.5 for _ in range(len(next_horizon_set))],
+                                True)
         next_horizon_set.insert(len(next_horizon_set.columns), "R", [0 for _ in range(len(next_horizon_set))],
                                 True)
         # Get the state set and action set so we can extract |S| and |A|
@@ -64,27 +146,34 @@ class Evaluator:
         for index, row in next_horizon_set.iterrows():
             state = row[state_features]
             action = row[action_features]
-            r = df[np.all(df[state_features] == state, axis=1) & np.all(df[action_features] == action, axis=1)]['R'].mean()
+            r = df[np.all(df[state_features] == state, axis=1) & np.all(df[action_features] == action, axis=1)][
+                'R'].mean()
             n_s = horizon_set[np.all(horizon_set[state_features] == state, axis=1)]['size'].sum()
             n_sa = horizon_set[np.all(horizon_set[state_features] == state, axis=1)
-                              & np.all(horizon_set[action_features] == action, axis=1)]['size'].sum()
+                               & np.all(horizon_set[action_features] == action, axis=1)]['size'].sum()
             pi_sa = behavioral_policy[np.all(behavioral_policy[state_features] == state, axis=1)
-                              & np.all(behavioral_policy[action_features] == action, axis=1)]['size'].sum()
+                                      & np.all(behavioral_policy[action_features] == action, axis=1)]['size'].sum()
             row['t_middle'] = row['size'] / n_sa
             delta_pi = math.sqrt(math.log(2 * S * A / self.delta1) / (2 * n_s))
             delta_tr = math.sqrt(math.log(2 * S * S * A / self.delta2) / (2 * n_sa))
-            alpha = 1 / gamma - (1 - 1/gamma) * (pi_sa + delta_pi)
+            alpha = 1 / gamma - (1 - 1 / gamma) * (pi_sa + delta_pi)
             beta = gamma + (1 - gamma) * (pi_sa + delta_pi)
             row['t_lower'] = max(0, alpha * (row['t_middle'] - delta_tr))
             row['t_upper'] = min(1, beta * (row['t_middle'] + delta_tr))
             row['R'] = r
             next_horizon_set.iloc[index] = row
         # Find the model that minimizes value function
-        mdp = self.find_mdp(next_horizon_set, 0)
+        mdp = self.find_mdp(next_horizon_set,
+                            create_feature_dict(state_features, action_features,
+                                                confounder_features, state_action_features,
+                                                next_state_features),
+                            agent=agent,
+                            state_set=state_set,
+                            action_set=action_set,
+                            max_depth=20)
         # Return minimized reward
         return mdp
 
-
-if __name__ == "__main__":
+if __name__ == '__main__':
     evaluator = Evaluator(0.025, 0.025)
     evaluator.evaluate("../4x4_maze_data.csv", None, 3, False)

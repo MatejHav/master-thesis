@@ -13,7 +13,8 @@ class QLearningAgent(Agent):
                                      *[torch.nn.Sequential(
                                          torch.nn.Linear(hidden_dim, hidden_dim),
                                          torch.nn.ReLU()) for _ in range(num_layers)],
-                                     torch.nn.Linear(hidden_dim, len(actions))
+                                     torch.nn.Linear(hidden_dim, len(actions)),
+                                     torch.nn.Softmax()
                                      )
         self.loss = torch.nn.MSELoss()
         self.actions = [Tensor([a() for a in action.a]) for action in actions]
@@ -21,6 +22,10 @@ class QLearningAgent(Agent):
 
     def choose(self, state: Tensor) -> int:
         return self.q(state).argmax().item()
+
+    def policy(self, state: Tensor) -> List[float]:
+        prob = self.q(state).tolist()
+        return prob
 
     def learn(self, state: Tensor, action: Tensor, next_state: Tensor, reward: float, terminal: bool):
         action_id = self.actions.index(action)
