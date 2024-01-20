@@ -15,9 +15,9 @@ if __name__ == '__main__':
     mdp_builder, mdp = build_4x4_blank_mdp()
     # mdp.visualize(max_iter=100)
     # Human
-    F1 = Function(lambda: np.random.rand())
-    X1 = Variable(F1)
-    # X1 = Constant(0.5, is_continuous=True)
+    # F1 = Function(lambda: np.random.rand())
+    # X1 = Variable(F1)
+    X1 = Constant(0.5, is_continuous=False)
     human_features = [X1]
     # Generator
     generator = Generator(mdp, human_features)
@@ -26,7 +26,7 @@ if __name__ == '__main__':
     #                                      starting_state=lambda _: mdp_builder.get_state("S(0, 0)"), max_iter=25,
     #                                      verbose=1)
     # df.to_csv(path)
-    max_epochs = 200
+    max_epochs = 3
     action_list = mdp_builder.action_list
     experiment = Experiment(state_size=3, action_size=1, pos_actions=action_list, x_size=1, gamma=0.5)
     means = []
@@ -35,7 +35,7 @@ if __name__ == '__main__':
         loss = experiment.train(path, verbose=0)
         print(epoch, loss)
         losses.append(loss)
-        res = experiment.evaluate(mdp, mdp_builder.get_state("S(0, 0)"), action_list, human_features, num_of_episodes=1, max_iter=25)
+        res = experiment.evaluate(mdp, mdp_builder.get_state("S(0, 0)"), action_list, human_features, num_of_episodes=5, max_iter=25)
         means.append(np.mean(res))
     plt.plot(means)
     plt.title("Average return with learned policy")
@@ -47,6 +47,7 @@ if __name__ == '__main__':
     plt.show()
 
     evaluator = Evaluator(0.025, 0.025)
-    evaluator.evaluate("4x4_maze_data.csv", experiment.agent, 3, False)
+    res = evaluator.evaluate("4x4_maze_data.csv", experiment.agent, 3, False)
+    print(res)
 
 

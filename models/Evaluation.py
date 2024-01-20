@@ -3,17 +3,13 @@ from typing import Dict
 import pandas as pd
 import sys
 
+import pyomo.core
 import torch
 
 from models import *
-from models import Agent
 
 from pyomo.environ import *
 from collections import defaultdict
-
-from pyutilib.services import register_executable, registered_executable
-
-register_executable(name='glpsol')
 
 
 def create_feature_dict(state_features: List[str], action_features: List[str],
@@ -36,69 +32,76 @@ class Evaluator:
         self.delta2 = transitional_delta
 
     def find_mdp(self, transition_set: pd.DataFrame, feature_dict: Dict[str, List[str]], agent: Agent,
-                 state_set: pd.DataFrame, action_set: pd.DataFrame, max_depth: int = 100) -> float:
-
-        # Cluster states together based on state-action pairs
-        row2index = defaultdict(list)
-        index2group = dict()
-        indexer = dict()
-        for index, row in transition_set.iterrows():
-            state_values = tuple(row[feature_dict["state_features"]].tolist())
-            action_values = tuple(row[feature_dict["action_features"]].tolist())
-            next_state_values = tuple(row[feature_dict["next_state_features"]].tolist())
-            row2index[state_values].append(index)
-            index2group[index] = row2index[state_values]
-            if state_values not in indexer:
-                indexer[state_values] = dict()
-            if action_values not in indexer[state_values]:
-                indexer[state_values][action_values] = dict()
-            indexer[state_values][action_values][next_state_values] = index
-
-        state2id = dict()
-        for index, row in state_set.iterrows():
-            state_values = tuple(row[feature_dict["state_features"]].tolist())
-            state2id[state_values] = index
-
+                 state_set: pd.DataFrame, action_set: pd.DataFrame) -> float:
         model = ConcreteModel()
-        model.T = RangeSet(0, len(transition_set) - 1)
-        model.S = RangeSet(0, len(state_set) - 1)
-        model.P = Var(model.T)
-        model.V = Var(model.S)
+        model.state = RangeSet(0, len(state_set) - 1)
+        model.action = RangeSet(0, len(action_set) - 1)
+        model.P = Var(model.state, model.action, model.state, initialize=0.5, within=PercentFraction)
+        model.V = Var(model.state, initialize=0, within=Reals)
+
+        indexer = dict()
+        reward = dict()
+        for state in range(len(state_set)):
+            for action in range(len(action_set)):
+                for next_state in range(len(state_set)):
+                    try:
+                        lookup = transition_set[
+                                    np.all(transition_set[feature_dict["state_features"]] == state_set.iloc[state][feature_dict["state_features"]], axis=1) &
+                                    np.all(transition_set[feature_dict["action_features"]] == action_set.iloc[action][feature_dict["action_features"]], axis=1) &
+                                    np.all(transition_set[feature_dict["next_state_features"]] == state_set.iloc[next_state][feature_dict["next_state_features"]], axis=1)]
+                    except:
+                        # Some transition never visited
+                        continue
+                    if len(lookup) > 0:
+                        if state not in indexer:
+                            indexer[state] = dict()
+                        if action not in indexer[state]:
+                            indexer[state][action] = dict()
+                        indexer[state][action][next_state] = lookup.index[0]
+                        if state not in reward:
+                            reward[state] = dict()
+                        if action not in reward[state]:
+                            reward[state][action] = list()
+                        reward[state][action].append(lookup["R"].mean())
 
         # Constraint 1: Transitions are withing expected bounds
-        def bound_constraint(model, i):
-            return (transition_set.iloc[i]["t_lower"], model.P[i], transition_set.iloc[i]["t_upper"])
+        def bound_constraint(model, state, action, next_state):
+            if state not in indexer or action not in indexer[state] or next_state not in indexer[state][action]:
+                return model.P[state, action, next_state] == 0
+            id = indexer[state][action][next_state]
+            return transition_set.iloc[id]["t_lower"], model.P[state, action, next_state], transition_set.iloc[id]["t_upper"]
 
-        model.c1 = Constraint(model.T, rule=bound_constraint)
+        model.c1 = Constraint(model.state, model.action, model.state, rule=bound_constraint)
 
         # Constraint 2: Transition probabilities sum up to 1
-        def probability_sum_constraint(model, i):
-            return sum([model.P[j] for j in index2group[i]]) == 1
+        def probability_sum_constraint(model, state, action):
+            return sum([model.P[state, action, j] for j in range(len(state_set))]) == 1
 
-        model.c2 = Constraint(model.T, rule=probability_sum_constraint)
+        model.c2 = Constraint(model.state, model.action, rule=probability_sum_constraint)
 
         # Constraint 3: Value function definition
-        def value_function_constraint(model, i):
-            # Extract state values
-            row = state_set.iloc[i]
-            state_values = row[feature_dict["state_features"]]
-            # Get policy from state i (list of probabilities for each action)
-            prob = agent.policy(torch.Tensor(state_values))
-            for action_id in range(len(prob)):
-                # Get possible resulting states from current states after taking action A
-                next_lookup = transition_set[
-                    np.all(transition_set[feature_dict["state_features"]] == state_values, axis=1)
-                    & np.all(transition_set[feature_dict["action_features"]] == action_set.iloc[action_id], axis=1)]
-                
+        # V(s) = pi_e(.|s) * (R(s, a) + P(s'|s,a) * V(s'))
+        def value_function_constraint(model, state):
+            return model.V[state] == sum(
+                [prob * sum(
+                    [model.P[state, action, next_state] * ((np.mean(reward[state][action]) if state in reward and action in reward[state] else 0) + model.V[next_state])
+                     for next_state in range(len(state_set))
+                     ])
+                 for action, prob in enumerate(agent.policy(torch.Tensor(state_set.iloc[state])))
+                 ])
 
-        # model.c3 = Constraint(model.S, rule=value_function_constraint)
+        model.c3 = Constraint(model.state, rule=value_function_constraint)
 
         # Objective: V(s_0)
-        model.OBJ = Objective(sum(model.V))
+        def objective_function(model):
+            return model.V[0]
 
+        model.OBJ = Objective(rule=objective_function, sense=pyomo.core.minimize)
+
+        print("Starting solving...")
         opt = SolverFactory('mindtpy')
         res = opt.solve(model)
-        print('done')
+        print('Done')
         return res
 
     def evaluate(self, data_path: str, agent: Agent, gamma: float, include_confounder: bool = True) -> float:
@@ -173,6 +176,7 @@ class Evaluator:
                             max_depth=20)
         # Return minimized reward
         return mdp
+
 
 if __name__ == '__main__':
     evaluator = Evaluator(0.025, 0.025)
