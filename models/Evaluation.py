@@ -9,7 +9,8 @@ import torch
 from models import *
 
 from pyomo.environ import *
-from collections import defaultdict
+
+from pyomo.util.model_size import build_model_size_report
 
 
 def create_feature_dict(state_features: List[str], action_features: List[str],
@@ -33,7 +34,7 @@ class Evaluator:
 
     def find_mdp(self, transition_set: pd.DataFrame, feature_dict: Dict[str, List[str]], agent: Agent,
                  state_set: pd.DataFrame, action_set: pd.DataFrame) -> float:
-        model = ConcreteModel()
+        model = ConcreteModel(name="ValueFunctionModel")
         model.state = RangeSet(0, len(state_set) - 1)
         model.action = RangeSet(0, len(action_set) - 1)
         model.P = Var(model.state, model.action, model.state, initialize=0.5, within=PercentFraction)
@@ -67,7 +68,7 @@ class Evaluator:
         # Constraint 1: Transitions are withing expected bounds
         def bound_constraint(model, state, action, next_state):
             if state not in indexer or action not in indexer[state] or next_state not in indexer[state][action]:
-                return model.P[state, action, next_state] == 0
+                return Constraint.Feasible
             id = indexer[state][action][next_state]
             return transition_set.iloc[id]["t_lower"], model.P[state, action, next_state], transition_set.iloc[id]["t_upper"]
 
@@ -82,12 +83,13 @@ class Evaluator:
         # Constraint 3: Value function definition
         # V(s) = pi_e(.|s) * (R(s, a) + P(s'|s,a) * V(s'))
         def value_function_constraint(model, state):
+            pol = agent.policy(torch.Tensor(state_set.iloc[state]))
             return model.V[state] == sum(
-                [prob * sum(
-                    [model.P[state, action, next_state] * ((np.mean(reward[state][action]) if state in reward and action in reward[state] else 0) + model.V[next_state])
-                     for next_state in range(len(state_set))
+                [sum(
+                    [model.P[state, action, next_state] * ((sum(reward[state][action]) / len(reward[state][action]) if state in reward and action in reward[state] else 0) + model.V[next_state])
+                     for next_state in model.state
                      ])
-                 for action, prob in enumerate(agent.policy(torch.Tensor(state_set.iloc[state])))
+                 for action in model.action
                  ])
 
         model.c3 = Constraint(model.state, rule=value_function_constraint)
@@ -98,9 +100,15 @@ class Evaluator:
 
         model.OBJ = Objective(rule=objective_function, sense=pyomo.core.minimize)
 
+        report = build_model_size_report(model)
+
+        print('Num constraints: ', report.activated.constraints)
+
+        print('Num variables: ', report.activated.variables)
+
         print("Starting solving...")
         opt = SolverFactory('mindtpy')
-        res = opt.solve(model)
+        res = opt.solve(model, tee=True)
         print('Done')
         return res
 
@@ -172,8 +180,7 @@ class Evaluator:
                                                 next_state_features),
                             agent=agent,
                             state_set=state_set,
-                            action_set=action_set,
-                            max_depth=20)
+                            action_set=action_set)
         # Return minimized reward
         return mdp
 
