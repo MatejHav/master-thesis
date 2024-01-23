@@ -33,11 +33,11 @@ class Evaluator:
         self.delta2 = transitional_delta
 
     def find_mdp(self, transition_set: pd.DataFrame, feature_dict: Dict[str, List[str]], agent: Agent,
-                 state_set: pd.DataFrame, action_set: pd.DataFrame) -> float:
+                 state_set: pd.DataFrame, action_set: pd.DataFrame, maximize: bool=False) -> float:
         model = ConcreteModel(name="ValueFunctionModel")
         model.state = RangeSet(0, len(state_set) - 1)
         model.action = RangeSet(0, len(action_set) - 1)
-        model.P = Var(model.state, model.action, model.state, initialize=0.5, within=PercentFraction)
+        model.P = Var(model.state, model.action, model.state, initialize=0.5)
         model.V = Var(model.state, initialize=0, within=Reals)
 
         indexer = dict()
@@ -45,14 +45,10 @@ class Evaluator:
         for state in range(len(state_set)):
             for action in range(len(action_set)):
                 for next_state in range(len(state_set)):
-                    try:
-                        lookup = transition_set[
-                                    np.all(transition_set[feature_dict["state_features"]] == state_set.iloc[state][feature_dict["state_features"]], axis=1) &
-                                    np.all(transition_set[feature_dict["action_features"]] == action_set.iloc[action][feature_dict["action_features"]], axis=1) &
-                                    np.all(transition_set[feature_dict["next_state_features"]] == state_set.iloc[next_state][feature_dict["next_state_features"]], axis=1)]
-                    except:
-                        # Some transition never visited
-                        continue
+                    lookup = transition_set[
+                                    np.all(transition_set[feature_dict["state_features"]] == tuple(state_set.iloc[state].tolist()), axis=1) &
+                                    np.all(transition_set[feature_dict["action_features"]] == tuple(action_set.iloc[action].tolist()), axis=1) &
+                                    np.all(transition_set[feature_dict["next_state_features"]] == tuple(state_set.iloc[next_state].tolist()), axis=1)]
                     if len(lookup) > 0:
                         if state not in indexer:
                             indexer[state] = dict()
@@ -65,10 +61,11 @@ class Evaluator:
                             reward[state][action] = list()
                         reward[state][action].append(lookup["R"].mean())
 
+
         # Constraint 1: Transitions are withing expected bounds
         def bound_constraint(model, state, action, next_state):
             if state not in indexer or action not in indexer[state] or next_state not in indexer[state][action]:
-                return Constraint.Feasible
+                return 0, model.P[state, action, next_state], 0.0001
             id = indexer[state][action][next_state]
             return transition_set.iloc[id]["t_lower"], model.P[state, action, next_state], transition_set.iloc[id]["t_upper"]
 
@@ -83,13 +80,13 @@ class Evaluator:
         # Constraint 3: Value function definition
         # V(s) = pi_e(.|s) * (R(s, a) + P(s'|s,a) * V(s'))
         def value_function_constraint(model, state):
-            pol = agent.policy(torch.Tensor(state_set.iloc[state]))
+            pol = agent.policy(torch.Tensor(state_set.iloc[state])).detach().numpy() # TODO pregenerate this
             return model.V[state] == sum(
-                [sum(
+                [pol[index] * sum(
                     [model.P[state, action, next_state] * ((sum(reward[state][action]) / len(reward[state][action]) if state in reward and action in reward[state] else 0) + model.V[next_state])
                      for next_state in model.state
                      ])
-                 for action in model.action
+                 for index, action in enumerate(model.action)
                  ])
 
         model.c3 = Constraint(model.state, rule=value_function_constraint)
@@ -98,21 +95,16 @@ class Evaluator:
         def objective_function(model):
             return model.V[0]
 
-        model.OBJ = Objective(rule=objective_function, sense=pyomo.core.minimize)
+        model.OBJ = Objective(rule=objective_function, sense=pyomo.core.minimize if not maximize else pyomo.core.maximize)
 
         report = build_model_size_report(model)
 
-        print('Num constraints: ', report.activated.constraints)
-
-        print('Num variables: ', report.activated.variables)
-
-        print("Starting solving...")
         opt = SolverFactory('mindtpy')
-        res = opt.solve(model, tee=True)
-        print('Done')
-        return res
+        opt.solve(model)
+        # model.display()
+        return model.OBJ()
 
-    def evaluate(self, data_path: str, agent: Agent, gamma: float, include_confounder: bool = True) -> float:
+    def evaluate(self, data_path: str, agent: Agent, gamma: float, include_confounder: bool = True, maximize: bool = False) -> float:
         assert gamma >= 1, "Gamma must be >= 1"
         # Read the data
         df = pd.read_csv(data_path)
@@ -125,12 +117,13 @@ class Evaluator:
         state_action_features = state_features.copy() if not include_confounder else confounder_features.copy()
         state_action_features.extend(action_features)
         # Extra data about next state for ease of use
-        next_state_features = state_action_features.copy()
-        next_state_features.extend(list(filter(lambda c: len(c) < 5 and 'S\'' in c, columns)))
+        next_state_features = list(filter(lambda c: len(c) < 5 and 'S\'' in c, columns))
+        next_state_action_features = state_action_features.copy()
+        next_state_action_features.extend(next_state_features)
         # Get the horizon set (set of unique state-action pairs) and the next_horizen_set (S, A, S')
         horizon_set = df[state_action_features]
         horizon_set = horizon_set.groupby(horizon_set.columns.tolist(), as_index=False).size()
-        next_horizon_set = df[next_state_features]
+        next_horizon_set = df[next_state_action_features]
         next_horizon_set: pd.DataFrame = next_horizon_set.groupby(next_horizon_set.columns.tolist(),
                                                                   as_index=False).size()
         next_horizon_set.insert(len(next_horizon_set.columns), "t_lower", [0 for _ in range(len(next_horizon_set))],
@@ -180,7 +173,7 @@ class Evaluator:
                                                 next_state_features),
                             agent=agent,
                             state_set=state_set,
-                            action_set=action_set)
+                            action_set=action_set, maximize=maximize)
         # Return minimized reward
         return mdp
 

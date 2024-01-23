@@ -113,4 +113,4 @@ def build_basic_mdp():
     return build_maze(2, 2, default_r=-1, max_r=100, p=0)
 
 def build_4x4_blank_mdp():
-    return build_maze(4, 4, default_r=-1, max_r=100, p=0)
+    return build_maze(4, 4, default_r=-1, max_r=10, p=0)
