@@ -1,11 +1,17 @@
+import os.path
+
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib.colors as mcolors
+
+BASE_COLORS = list(mcolors.BASE_COLORS.keys())
 
 from data.generators import *
 from data.builders import *
 from environments import *
 from models import Evaluator
 from models.Experiment import *
+
 
 def generate_data(path, human_features):
     # m, n = 5, 5
@@ -14,6 +20,8 @@ def generate_data(path, human_features):
     # p = 0.2
     mdp_builder, mdp = build_4x4_blank_mdp()
     # mdp.visualize(max_iter=100)
+    if os.path.exists(path):
+        return mdp, mdp_builder
 
     # Generator
     generator = Generator(mdp, human_features)
@@ -22,6 +30,7 @@ def generate_data(path, human_features):
                                          verbose=0)
     df.to_csv(path)
     return mdp, mdp_builder
+
 
 def one_run(mdp, mdp_builder, path, human_features, max_epochs=20):
     action_list = mdp_builder.action_list
@@ -36,6 +45,7 @@ def one_run(mdp, mdp_builder, path, human_features, max_epochs=20):
         means.append(np.mean(res))
     return experiment, loss, losses
 
+
 def main():
     # Human
     # F1 = Function(lambda: np.random.rand())
@@ -44,8 +54,8 @@ def main():
     human_features = [X1]
 
     # RL
-    total_runs = 2
-    max_epochs = 2
+    total_runs = 5
+    max_epochs = 15
     path = "4x4_maze_data"
     agents = []
     all_losses = []
@@ -56,12 +66,13 @@ def main():
         agents.append(exp.agent)
         all_losses.append(losses)
 
+    num_of_gammas = 5
     # Sensitivity analysis
-    gammas = np.linspace(1, 7, 5)
+    gammas = np.linspace(1, 10, num_of_gammas)
     evaluator = Evaluator(0.025, 0.025)
     # Worst case
     res = []
-    for gamma in gammas:
+    for gamma in tqdm(gammas):
         values = []
         for index, agent in enumerate(agents):
             value = evaluator.evaluate(f"4x4_maze_data{index}.csv", agent, gamma, False)
@@ -71,22 +82,25 @@ def main():
     plt.title(f"Comparison of {total_runs} learned policies")
     plt.xlabel("Gamma (sensitivity)")
     plt.ylabel("V(s_0)")
-    plt.plot(gammas, res.mean(axis=1), color=(0,0,1), labe="Worst case")
-    plt.fill_between(res.mean(axis=1), res.max(axis=1), alpha=0.5, color=(0,0,1))
-    plt.fill_between(res.mean(axis=1), res.min(axis=1), alpha=0.5, color=(0, 0, 1))
+
+    for i in range(num_of_gammas):
+        plt.plot(gammas, res[:, i], color=BASE_COLORS[i], label=f"Worst case agent {i}")
+    # plt.fill_between(gammas, res.mean(axis=1), res.max(axis=1), alpha=0.5, color=(0, 0, 1))
+    # plt.fill_between(gammas, res.mean(axis=1), res.min(axis=1), alpha=0.5, color=(0, 0, 1))
 
     # Best case
     res = []
-    for gamma in gammas:
+    for gamma in tqdm(gammas):
         values = []
-        for agent in agents:
-            value = evaluator.evaluate("4x4_maze_data.csv", agent, gamma, False)
+        for i, agent in enumerate(agents):
+            value = evaluator.evaluate(f"4x4_maze_data{i}.csv", agent, gamma, False, maximize=True)
             values.append(value)
         res.append(values)
     res = np.array(res)
-    plt.plot(gammas, res.mean(axis=1), color=(1,0,0), label="Best case")
-    plt.fill_between(res.mean(axis=1), res.max(axis=1), alpha=0.5, color=(1, 0, 0))
-    plt.fill_between(res.mean(axis=1), res.min(axis=1), alpha=0.5, color=(1, 0, 0))
+    for i in range(num_of_gammas):
+        plt.plot(gammas, res[:, i], '--', color=BASE_COLORS[i], label=f"Best case agent {i}")
+    # plt.fill_between(gammas, res.mean(axis=1), res.max(axis=1), alpha=0.5, color=(1, 0, 0))
+    # plt.fill_between(gammas, res.mean(axis=1), res.min(axis=1), alpha=0.5, color=(1, 0, 0))
     plt.legend()
 
     plt.show()
@@ -102,6 +116,3 @@ if __name__ == '__main__':
     # plt.plot(losses)
     # plt.title("Average loss of training data")
     # plt.show()
-
-
-
