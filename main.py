@@ -32,11 +32,11 @@ def generate_data(path, human_features):
     return mdp, mdp_builder
 
 
-def one_run(mdp, mdp_builder, path, human_features, max_epochs=20):
+def one_run(mdp, mdp_builder, agent, path, human_features, max_epochs=20):
     action_list = mdp_builder.action_list
     # agent = CustomAgent("Custom Agent", pick_probability=lambda state: [0, 0, 0, 1] if state[0] == 3 else [0, 0, 1, 0])
     # agent = CustomAgent("Custom Agent", pick_probability=lambda state: [1, 0, 0, 0] if state[1] == 0 else [0, 0, 1, 0])
-    agent = QLearningAgent(name="QLearner", state_size=3, actions=action_list, alpha=0.01, gamma=0.95, hidden_dim=10, num_layers=3)
+    # agent = QLearningAgent(name="QLearner", state_size=3, actions=action_list, alpha=0.01, gamma=0.95, hidden_dim=10, num_layers=3)
     experiment = Experiment(agent=agent, state_size=3, action_size=1, x_size=1)
     means = []
     losses = []
@@ -57,17 +57,20 @@ def main():
     human_features = [X1]
 
     # RL
-    total_runs = 2
-    max_epochs = 30
+    total_runs = 10
+    max_epochs = 1
     path = "4x4_maze_data_no_conf_small_transition"
     agents = []
     all_losses = []
     for run in tqdm(range(total_runs)):
         temp_path = path + f"{run}.csv"
         mdp, builder = generate_data(path=temp_path, human_features=human_features)
-        exp, _, losses = one_run(mdp, builder, temp_path, human_features=human_features, max_epochs=max_epochs)
-        agents.append(exp.agent)
-        all_losses.append(losses)
+        agent1 = CustomAgent("Custom Agent1", pick_probability=lambda state: [0.01, 0.01, 0.01, 0.97] if state[0] == 3 else [0.01, 0.01, 0.97, 0.01])
+        agent2 = CustomAgent("Custom Agent2", pick_probability=lambda state: [0.97, 0.01, 0.01, 0.01] if state[1] == 0 else [0.01, 0.01, 0.97, 0.01])
+        exp1, _, losses1 = one_run(mdp, builder, agent1, temp_path, human_features=human_features, max_epochs=max_epochs)
+        exp2, _, losses2 = one_run(mdp, builder, agent2, temp_path, human_features=human_features, max_epochs=max_epochs)
+        agents.append((exp1.agent, exp2.agent))
+        all_losses.append((losses1, losses2))
 
     num_of_gammas = 5
     # Sensitivity analysis
@@ -77,35 +80,40 @@ def main():
     res = []
     for gamma in tqdm(gammas):
         values = []
-        for index, agent in enumerate(agents):
-            value = evaluator.evaluate(path + f"{index}.csv", agent, gamma, False)
-            values.append(value)
+        for index, (agent1, agent2) in enumerate(agents):
+            value1 = evaluator.evaluate(path + f"{index}.csv", agent1, gamma, False)
+            value2 = evaluator.evaluate(path + f"{index}.csv", agent2, gamma, False)
+            values.append((value1, value2))
         res.append(values)
     res = np.array(res)
     plt.title(f"Comparison of {total_runs} learned policies")
     plt.xlabel("Gamma (sensitivity)")
     plt.ylabel("V(s_0)")
 
-    for i in range(total_runs):
-        plt.plot(gammas, res[:, i], color=BASE_COLORS[i], label=f"Worst case agent {i}")
-    # plt.fill_between(gammas, res.mean(axis=1), res.max(axis=1), alpha=0.5, color=(0, 0, 1))
-    # plt.fill_between(gammas, res.mean(axis=1), res.min(axis=1), alpha=0.5, color=(0, 0, 1))
+    plt.plot(gammas, res[:, :, 0].mean(axis=1), color=BASE_COLORS[0], label=f"Worst case agent {0}")
+    plt.fill_between(gammas, res[:, :, 0].mean(axis=1), res[:, :, 0].max(axis=1), alpha=0.5, color=BASE_COLORS[0])
+    plt.fill_between(gammas, res[:, :, 0].mean(axis=1), res[:, :, 0].min(axis=1), alpha=0.5, color=BASE_COLORS[0])
+    plt.plot(gammas, res[:, :, 1].mean(axis=1), color=BASE_COLORS[1], label=f"Worst case agent {1}")
+    plt.fill_between(gammas, res[:, :, 1].mean(axis=1), res[:, :, 1].max(axis=1), alpha=0.5, color=BASE_COLORS[1])
+    plt.fill_between(gammas, res[:, :, 1].mean(axis=1), res[:, :, 1].min(axis=1), alpha=0.5, color=BASE_COLORS[1])
 
     # Best case
     res = []
     for gamma in tqdm(gammas):
         values = []
-        for i, agent in enumerate(agents):
-            value = evaluator.evaluate(path + f"{i}.csv", agent, gamma, False, maximize=True)
-            values.append(value)
+        for i, (agent1, agent2) in enumerate(agents):
+            value1 = evaluator.evaluate(path + f"{i}.csv", agent1, gamma, False, maximize=True)
+            value2 = evaluator.evaluate(path + f"{i}.csv", agent2, gamma, False, maximize=True)
+            values.append((value1, value2))
         res.append(values)
     res = np.array(res)
-    for i in range(total_runs):
-        plt.plot(gammas, res[:, i], '--', color=BASE_COLORS[i], label=f"Best case agent {i}")
-    # plt.fill_between(gammas, res.mean(axis=1), res.max(axis=1), alpha=0.5, color=(1, 0, 0))
-    # plt.fill_between(gammas, res.mean(axis=1), res.min(axis=1), alpha=0.5, color=(1, 0, 0))
+    plt.plot(gammas, res[:, :, 0].mean(axis=1), '--', color=BASE_COLORS[0], label=f"Best case agent {0}")
+    plt.fill_between(gammas, res[:, :, 0].mean(axis=1), res[:, :, 0].max(axis=1), alpha=0.5, color=BASE_COLORS[0])
+    plt.fill_between(gammas, res[:, :, 0].mean(axis=1), res[:, :, 0].min(axis=1), alpha=0.5, color=BASE_COLORS[0])
+    plt.plot(gammas, res[:, :, 1].mean(axis=1), '--', color=BASE_COLORS[1], label=f"Best case agent {1}")
+    plt.fill_between(gammas, res[:, :, 1].mean(axis=1), res[:, :, 1].max(axis=1), alpha=0.5, color=BASE_COLORS[1])
+    plt.fill_between(gammas, res[:, :, 1].mean(axis=1), res[:, :, 1].min(axis=1), alpha=0.5, color=BASE_COLORS[1])
     plt.legend()
-
     plt.show()
 
 
