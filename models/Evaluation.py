@@ -40,6 +40,7 @@ class Evaluator:
         model.action = RangeSet(0, len(action_set)-1)
         model.P = Var(model.state, model.action, model.state, bounds=(0, 1))
         model.V = Var(model.state, bounds=(-50, 50))
+        gamma = 0.95
 
         indexer = dict()
         reward = defaultdict(int)
@@ -69,7 +70,7 @@ class Evaluator:
 
         agent_policy = []
         for _, state in state_set.iterrows():
-            agent_policy.append(agent.policy(torch.Tensor(state)).detach().numpy())
+            agent_policy.append(agent.policy(torch.Tensor(state)))
         agent_policy = np.array(agent_policy)
 
         # Constraint 1: Transitions are withing expected bounds
@@ -94,10 +95,9 @@ class Evaluator:
         # V(s) = pi_e(.|s) * (R(s, a) + P(s'|s,a) * V(s'))
         def value_function_constraint(model, state):
             if terminal[state]:
-                print(state, reward[state])
                 return model.V[state] == reward[state]
             return model.V[state] - sum(
-                [agent_policy[state][action] * (reward[state] + sum([
+                [agent_policy[state][action] * gamma * (reward[state] + sum([
                         model.P[state, action, next_state] * model.V[next_state]
                      for next_state in model.state
                      ]))

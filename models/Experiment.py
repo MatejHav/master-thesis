@@ -3,11 +3,11 @@ from models.QLearning import *
 
 class Experiment:
 
-    def __init__(self, state_size: int, action_size: int, pos_actions: List[Action], x_size: int, alpha=0.5, gamma=0.95, include_confounders=False):
+    def __init__(self, agent: Agent, state_size: int, action_size: int, x_size: int, include_confounders=False):
         self.state_size = state_size
         self.action_size = action_size
         self.x_size = x_size
-        self.agent = QLearningAgent(name="QLearner", state_size=state_size + x_size if include_confounders else state_size, actions=pos_actions, alpha=alpha, gamma=gamma, hidden_dim=10, num_layers=3)
+        self.agent = agent
         self.include_conf = include_confounders
 
     def train(self, csv_file: str, verbose: int=1):

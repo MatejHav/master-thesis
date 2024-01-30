@@ -9,7 +9,7 @@ BASE_COLORS = list(mcolors.BASE_COLORS.keys())
 from data.generators import *
 from data.builders import *
 from environments import *
-from models import Evaluator
+from models import Evaluator, CustomAgent
 from models.Experiment import *
 
 
@@ -34,7 +34,10 @@ def generate_data(path, human_features):
 
 def one_run(mdp, mdp_builder, path, human_features, max_epochs=20):
     action_list = mdp_builder.action_list
-    experiment = Experiment(state_size=3, action_size=1, pos_actions=action_list, x_size=1, gamma=0.5)
+    # agent = CustomAgent("Custom Agent", pick_probability=lambda state: [0, 0, 0, 1] if state[0] == 3 else [0, 0, 1, 0])
+    # agent = CustomAgent("Custom Agent", pick_probability=lambda state: [1, 0, 0, 0] if state[1] == 0 else [0, 0, 1, 0])
+    agent = QLearningAgent(name="QLearner", state_size=3, actions=action_list, alpha=0.01, gamma=0.95, hidden_dim=10, num_layers=3)
+    experiment = Experiment(agent=agent, state_size=3, action_size=1, x_size=1)
     means = []
     losses = []
     for epoch in range(max_epochs):
@@ -48,15 +51,15 @@ def one_run(mdp, mdp_builder, path, human_features, max_epochs=20):
 
 def main():
     # Human
-    # F1 = Function(lambda: np.random.rand())
+    # F1 = Function(lambda: 0.25 + 0.5 * np.random.rand())
     # X1 = Variable(F1)
-    X1 = Constant(0.5, is_continuous=False)
+    X1 = Constant(1-0.025, is_continuous=False)
     human_features = [X1]
 
     # RL
-    total_runs = 5
-    max_epochs = 15
-    path = "4x4_maze_data"
+    total_runs = 2
+    max_epochs = 30
+    path = "4x4_maze_data_no_conf_small_transition"
     agents = []
     all_losses = []
     for run in tqdm(range(total_runs)):
@@ -75,7 +78,7 @@ def main():
     for gamma in tqdm(gammas):
         values = []
         for index, agent in enumerate(agents):
-            value = evaluator.evaluate(f"4x4_maze_data{index}.csv", agent, gamma, False)
+            value = evaluator.evaluate(path + f"{index}.csv", agent, gamma, False)
             values.append(value)
         res.append(values)
     res = np.array(res)
@@ -83,7 +86,7 @@ def main():
     plt.xlabel("Gamma (sensitivity)")
     plt.ylabel("V(s_0)")
 
-    for i in range(num_of_gammas):
+    for i in range(total_runs):
         plt.plot(gammas, res[:, i], color=BASE_COLORS[i], label=f"Worst case agent {i}")
     # plt.fill_between(gammas, res.mean(axis=1), res.max(axis=1), alpha=0.5, color=(0, 0, 1))
     # plt.fill_between(gammas, res.mean(axis=1), res.min(axis=1), alpha=0.5, color=(0, 0, 1))
@@ -93,11 +96,11 @@ def main():
     for gamma in tqdm(gammas):
         values = []
         for i, agent in enumerate(agents):
-            value = evaluator.evaluate(f"4x4_maze_data{i}.csv", agent, gamma, False, maximize=True)
+            value = evaluator.evaluate(path + f"{i}.csv", agent, gamma, False, maximize=True)
             values.append(value)
         res.append(values)
     res = np.array(res)
-    for i in range(num_of_gammas):
+    for i in range(total_runs):
         plt.plot(gammas, res[:, i], '--', color=BASE_COLORS[i], label=f"Best case agent {i}")
     # plt.fill_between(gammas, res.mean(axis=1), res.max(axis=1), alpha=0.5, color=(1, 0, 0))
     # plt.fill_between(gammas, res.mean(axis=1), res.min(axis=1), alpha=0.5, color=(1, 0, 0))

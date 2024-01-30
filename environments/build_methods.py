@@ -75,24 +75,24 @@ def build_maze(m: int, n: int, default_r: float, max_r: float, p: float) -> Tupl
             mdp_builder.add_constant_discrete_state(f"S({x}, {y})", [x, y, is_wall], r,
                                                     terminal=x == m - 1 and y == n - 1)
             if not is_wall:
+                # If previous x is not a wall
                 if not mdp_builder.get_state(f"S({x - 1}, {y})").X[-1]():
                     mdp_builder.connect_states(f"S({x - 1}, {y})", f"S({x}, {y})", "R", lambda human: 1 - human[0]())
+                    mdp_builder.connect_states(f"S({x - 1}, {y})", f"S({x - 1}, {y})", "R", lambda human: human[0]())
                     if not (x == m - 1 and y == n - 1):
                         mdp_builder.connect_states(f"S({x}, {y})", f"S({x - 1}, {y})", "L",
                                                    lambda human: 1 - human[0]())
-                    mdp_builder.connect_states(f"S({x - 1}, {y})", f"S({x - 1}, {y})", "R", lambda human: human[0]())
-                    if not (x == m - 1 and y == n - 1):
                         mdp_builder.connect_states(f"S({x}, {y})", f"S({x}, {y})", "L", lambda human: human[0]())
                 else:
                     mdp_builder.connect_states(f"S({x - 1}, {y})", f"S({x - 1}, {y})", "R", lambda human: 1)
                     if not (x == m - 1 and y == n - 1):
                         mdp_builder.connect_states(f"S({x}, {y})", f"S({x}, {y})", "L", lambda human: 1)
+                # If row under is not a wall
                 if not mdp_builder.get_state(f"S({x}, {y - 1})").X[-1]():
                     mdp_builder.connect_states(f"S({x}, {y - 1})", f"S({x}, {y})", "U", lambda human: 1 - human[0]())
-                    if not (x == m - 1 and y == n - 1):
-                        mdp_builder.connect_states(f"S({x}, {y})", f"S({x}, {y - 1})", "D", lambda human: 1 - human[0]())
                     mdp_builder.connect_states(f"S({x}, {y - 1})", f"S({x}, {y - 1})", "U", lambda human: human[0]())
                     if not (x == m - 1 and y == n - 1):
+                        mdp_builder.connect_states(f"S({x}, {y})", f"S({x}, {y - 1})", "D", lambda human: 1 - human[0]())
                         mdp_builder.connect_states(f"S({x}, {y})", f"S({x}, {y})", "D", lambda human: human[0]())
                 else:
                     mdp_builder.connect_states(f"S({x}, {y - 1})", f"S({x}, {y - 1})", "U", lambda human: 1)
