@@ -113,7 +113,9 @@ class Evaluator:
         model.OBJ = Objective(rule=objective_function,
                               sense=pyomo.core.minimize if not maximize else pyomo.core.maximize)
 
-        opt = SolverFactory('mindtpy')
+        opt = SolverFactory('ipopt')
+        opt.options['max_iter'] = 5000
+        # opt.options['acceptable_tol'] = 0.0001
         opt.solve(model)
         # model.display()
         return model.OBJ()
@@ -157,8 +159,10 @@ class Evaluator:
         next_state_set.columns = state_features
         state_set = pd.concat([state_set, next_state_set]).drop_duplicates(ignore_index=True)
         action_set = horizon_set[action_features].drop_duplicates(ignore_index=True)
+        # TODO make the terminal set be constructed of all state, not just the next state
         terminal_set = df[terminal_features].drop_duplicates(ignore_index=True)
         terminal = list(terminal_set["TERMINAL"])
+        terminal.insert(0, False) # Add False as the starting state
         S = len(state_set)
         A = len(action_set)
         # Get observed behavioral policy from data (action taken from state divided by visits to state)

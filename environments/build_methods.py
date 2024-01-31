@@ -112,5 +112,41 @@ def build_basic_mdp():
     """
     return build_maze(2, 2, default_r=-1, max_r=100, p=0)
 
+def build_2_phase_treatment_mdp():
+    # Actions
+    mdp_builder = (MDPBuilder("maze_mdp", 2, 1)
+                   .add_action("T", [Constant(0, is_continuous=False)])
+                   .add_action("C", [Constant(1, is_continuous=False)]))
+    # States
+    mdp_builder.add_constant_discrete_state("start", [0, 0], 0)
+    mdp_builder.add_constant_discrete_state("S0", [1, 0], 0)
+    mdp_builder.add_constant_discrete_state("S1", [0, 1], 0)
+    mdp_builder.add_constant_discrete_state("S00", [1, 2], -2)
+    mdp_builder.add_constant_discrete_state("S01", [1, -1], 20)
+    mdp_builder.add_constant_discrete_state("S10", [2, 1], -2)
+    mdp_builder.add_constant_discrete_state("S11", [-1, 1], 2)
+    mdp_builder.add_constant_discrete_state("end", [-1, -1], 0, terminal=True)
+    mdp_builder.connect_states("start", "S0", "C", lambda human: 0.25 if human[0] == 1 else 0.75)
+    mdp_builder.connect_states("start", "S1", "C", lambda human: 0.75 if human[0] == 1 else 0.25)
+    mdp_builder.connect_states("start", "S1", "T", lambda human: 0.9 if human[0] == 1 else 0.5)
+    mdp_builder.connect_states("start", "S0", "T", lambda human: 0.1 if human[0] == 1 else 0.5)
+    mdp_builder.connect_states("S0", "S00", "C", lambda human: 0.8 if human[0] == 1 else 0.25)
+    mdp_builder.connect_states("S0", "S01", "C", lambda human: 0.2 if human[0] == 1 else 0.75)
+    mdp_builder.connect_states("S0", "S01", "T", lambda human: 0.25 if human[0] == 1 else 0.95)
+    mdp_builder.connect_states("S0", "S00", "T", lambda human: 0.75 if human[0] == 1 else 0.05)
+    mdp_builder.connect_states("S1", "S10", "C", lambda human: 1)
+    mdp_builder.connect_states("S1", "S11", "T", lambda human: 1)
+    mdp_builder.connect_states("S00", "end", "C", lambda _: 1)
+    mdp_builder.connect_states("S00", "end", "T", lambda _: 1)
+    mdp_builder.connect_states("S01", "end", "C", lambda _: 1)
+    mdp_builder.connect_states("S01", "end", "T", lambda _: 1)
+    mdp_builder.connect_states("S10", "end", "C", lambda _: 1)
+    mdp_builder.connect_states("S10", "end", "T", lambda _: 1)
+    mdp_builder.connect_states("S11", "end", "C", lambda _: 1)
+    mdp_builder.connect_states("S11", "end", "T", lambda _: 1)
+
+    mdp = mdp_builder.build()
+    return mdp_builder, mdp
+
 def build_4x4_blank_mdp():
     return build_maze(4, 4, default_r=-1, max_r=10, p=0)

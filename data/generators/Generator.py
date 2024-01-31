@@ -7,9 +7,10 @@ from data.generators.MDP import *
 
 class Generator:
 
-    def __init__(self, mdp: MDP, x: List[Value]):
+    def __init__(self, mdp: MDP, x: List[Value], behavioral_policy: Callable[[State, List[Action], List[Value]], Action]):
         self.mdp = mdp
         self.x = x
+        self.policy = behavioral_policy
 
     def generate_uniform_data(self, num_of_rows: int, n_jobs: int, starting_state: Callable[[List[Value]], State], max_iter: int=100, verbose: int=1):
         rows_per_thread = [num_of_rows // n_jobs for _ in range(n_jobs)]
@@ -42,7 +43,7 @@ class Generator:
                     pos_actions = list(self.mdp.get_actions(state).keys())
                     if len(pos_actions) == 0:
                         break
-                    A = np.random.choice(pos_actions)
+                    A = self.policy(state, pos_actions, x) # np.random.choice(pos_actions)
                     row = x.copy()
                     row.append(i)
                     row.append(c)
