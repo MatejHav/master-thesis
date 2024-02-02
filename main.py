@@ -20,7 +20,7 @@ def generate_data(path, human_features):
     #     return mdp, mdp_builder
 
     # Generator
-    behavioral_policy = lambda state, pos_actions, x: np.random.choice(pos_actions) if x[0] == 1 else np.random.choice(pos_actions, p=[0.6, 0.4])
+    behavioral_policy = lambda state, pos_actions, x: np.random.choice(pos_actions) if x[0] == 1 else np.random.choice(pos_actions, p=[0.75, 0.25])
     generator = Generator(mdp, human_features, behavioral_policy)
     df = generator.generate_uniform_data(num_of_rows=4000, n_jobs=16,
                                          starting_state=lambda _: mdp_builder.get_state("start"), max_iter=5,
@@ -45,16 +45,16 @@ def one_run(mdp, mdp_builder, agent, path, human_features, max_epochs=20):
 
 def main():
     # Human
-    F1 = Function(lambda: 1 if np.random.rand() >= 0.25 else 0)
+    F1 = Function(lambda: 1 if np.random.rand() >= 0.5 else 0)
     X1 = Variable(F1)
     # X1 = Constant(1-0.025, is_continuous=False)
     human_features = [X1]
 
     # RL
 
-    total_runs = 50
-    max_epochs = 1
-    path = "simple_case_confounding"
+    total_runs = 10
+    max_epochs = 5
+    path = "csv_files/simple"
     agents = []
     all_losses = []
     for run in tqdm(range(total_runs)):
@@ -62,17 +62,17 @@ def main():
         mdp, builder = generate_data(path=temp_path, human_features=human_features)
         # agent1 = CustomAgent("Custom Agent1", pick_probability=lambda state: [0.01, 0.01, 0.01, 0.97] if state[0] == 3 else [0.01, 0.01, 0.97, 0.01])
         # agent2 = CustomAgent("Custom Agent2", pick_probability=lambda state: [0.97, 0.01, 0.01, 0.01] if state[1] == 0 else [0.01, 0.01, 0.97, 0.01])
-        # agent = QLearningAgent(name="QLearner", state_size=mdp.state_size, actions=action_list, alpha=0.01, gamma=0.95, hidden_dim=10, num_layers=3)
-        agent1 = CustomAgent("Custom Agent1", pick_probability=lambda state: [0.9, 0.1] if state[0] == 0 else [0.5, 0.5])
-        agent2 = CustomAgent("Custom Agent2", pick_probability=lambda state: [0.1, 0.9] if state[0] == 0 else [0.6, 0.4])
+        agent2 = QLearningAgent(name="QLearner", state_size=mdp.state_size, actions=builder.action_list, alpha=0.01, gamma=0.95, hidden_dim=10, num_layers=2)
+        agent1 = CustomAgent("Custom Agent1", pick_probability=lambda state: [0.5, 0.5])
+        # agent2 = CustomAgent("Custom Agent2", pick_probability=lambda state: [0.8, 0.2])
         exp1, _, losses1 = one_run(mdp, builder, agent1, temp_path, human_features=human_features, max_epochs=max_epochs)
         exp2, _, losses2 = one_run(mdp, builder, agent2, temp_path, human_features=human_features, max_epochs=max_epochs)
         agents.append((exp1.agent, exp2.agent))
         all_losses.append((losses1, losses2))
 
-    num_of_gammas = 21
+    num_of_gammas = 20
     # Sensitivity analysis
-    gammas = np.linspace(1, 15, num_of_gammas)
+    gammas = np.linspace(1, 10, num_of_gammas)
     evaluator = Evaluator(0.025, 0.025)
     # Worst case
     res = []
@@ -88,12 +88,12 @@ def main():
     plt.xlabel("Gamma (sensitivity)")
     plt.ylabel("V(s_0)")
 
-    plt.plot(gammas, res[:, :, 0].mean(axis=1), color=BASE_COLORS[0], label=f"Worst case agent {0}")
-    plt.fill_between(gammas, res[:, :, 0].mean(axis=1), res[:, :, 0].std(axis=1), alpha=0.2, color=BASE_COLORS[0])
-    plt.fill_between(gammas, res[:, :, 0].mean(axis=1), res[:, :, 0].std(axis=1), alpha=0.2, color=BASE_COLORS[0])
-    plt.plot(gammas, res[:, :, 1].mean(axis=1), color=BASE_COLORS[1], label=f"Worst case agent {1}")
-    plt.fill_between(gammas, res[:, :, 1].mean(axis=1), res[:, :, 1].std(axis=1), alpha=0.2, color=BASE_COLORS[1])
-    plt.fill_between(gammas, res[:, :, 1].mean(axis=1), res[:, :, 1].std(axis=1), alpha=0.2, color=BASE_COLORS[1])
+    plt.plot(gammas, res[:, :, 0].mean(axis=1), color=BASE_COLORS[0], label=f"Worst case {agent1.name}")
+    # plt.fill_between(gammas, res[:, :, 0].mean(axis=1), res[:, :, 0].std(axis=1), alpha=0.2, color=BASE_COLORS[0])
+    # plt.fill_between(gammas, res[:, :, 0].mean(axis=1), res[:, :, 0].std(axis=1), alpha=0.2, color=BASE_COLORS[0])
+    plt.plot(gammas, res[:, :, 1].mean(axis=1), color=BASE_COLORS[1], label=f"Worst case {agent2.name}")
+    # plt.fill_between(gammas, res[:, :, 1].mean(axis=1), res[:, :, 1].std(axis=1), alpha=0.2, color=BASE_COLORS[1])
+    # plt.fill_between(gammas, res[:, :, 1].mean(axis=1), res[:, :, 1].std(axis=1), alpha=0.2, color=BASE_COLORS[1])
     lowest_y = res.min()
 
     # Best case
@@ -106,16 +106,16 @@ def main():
             values.append((value1, value2))
         res.append(values)
     res = np.array(res)
-    plt.plot(gammas, res[:, :, 0].mean(axis=1), '--', color=BASE_COLORS[0], label=f"Best case agent {0}")
-    plt.fill_between(gammas, res[:, :, 0].mean(axis=1), res[:, :, 0].std(axis=1), alpha=0.2, color=BASE_COLORS[0])
-    plt.fill_between(gammas, res[:, :, 0].mean(axis=1), res[:, :, 0].std(axis=1), alpha=0.2, color=BASE_COLORS[0])
-    plt.plot(gammas, res[:, :, 1].mean(axis=1), '--', color=BASE_COLORS[1], label=f"Best case agent {1}")
-    plt.fill_between(gammas, res[:, :, 1].mean(axis=1), res[:, :, 1].std(axis=1), alpha=0.2, color=BASE_COLORS[1])
-    plt.fill_between(gammas, res[:, :, 1].mean(axis=1), res[:, :, 1].std(axis=1), alpha=0.2, color=BASE_COLORS[1])
+    plt.plot(gammas, res[:, :, 0].mean(axis=1), '--', color=BASE_COLORS[0], label=f"Best case {agent1.name}")
+    # plt.fill_between(gammas, res[:, :, 0].mean(axis=1), res[:, :, 0].std(axis=1), alpha=0.2, color=BASE_COLORS[0])
+    # plt.fill_between(gammas, res[:, :, 0].mean(axis=1), res[:, :, 0].std(axis=1), alpha=0.2, color=BASE_COLORS[0])
+    plt.plot(gammas, res[:, :, 1].mean(axis=1), '--', color=BASE_COLORS[1], label=f"Best case {agent2.name}")
+    # plt.fill_between(gammas, res[:, :, 1].mean(axis=1), res[:, :, 1].std(axis=1), alpha=0.2, color=BASE_COLORS[1])
+    # plt.fill_between(gammas, res[:, :, 1].mean(axis=1), res[:, :, 1].std(axis=1), alpha=0.2, color=BASE_COLORS[1])
     highest_y = res.max()
 
-    plt.ylim(lowest_y, highest_y)
-    plt.autoscale(False)
+    # plt.ylim(lowest_y, highest_y)
+    # plt.autoscale(False)
     plt.legend()
     plt.show()
 

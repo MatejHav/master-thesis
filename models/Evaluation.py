@@ -66,7 +66,7 @@ class Evaluator:
             lookup = data[
                 np.all(data[feature_dict["next_state_features"]] == tuple(state_set.iloc[next_state].tolist()),
                        axis=1)]
-            reward[next_state] = lookup["R"].mean()
+            reward[next_state] = lookup["R"].mean() if len(lookup) > 0 else 0
 
         agent_policy = []
         for _, state in state_set.iterrows():
@@ -76,7 +76,7 @@ class Evaluator:
         # Constraint 1: Transitions are withing expected bounds
         def bound_constraint(model, state, action, next_state):
             if state not in indexer or action not in indexer[state] or next_state not in indexer[state][action] or terminal[state]:
-                return model.P[state, action, next_state] == 0
+                return 0, model.P[state, action, next_state], 0.0001
             id = indexer[state][action][next_state]
             return transition_set.iloc[id]["t_lower"], model.P[state, action, next_state], transition_set.iloc[id][
                 "t_upper"]
@@ -86,8 +86,8 @@ class Evaluator:
         # Constraint 2: Transition probabilities sum up to 1
         def probability_sum_constraint(model, state, action):
             if state not in indexer or action not in indexer[state] or terminal[state]:
-                return sum([model.P[state, action, j] for j in range(len(state_set))]) == 0
-            return sum([model.P[state, action, j] for j in range(len(state_set))]) == 1
+                return 0, sum([model.P[state, action, j] for j in range(len(state_set))]), 0.0001
+            return 0.9999, sum([model.P[state, action, j] for j in range(len(state_set))]), 1.0001
 
         model.c2 = Constraint(model.state, model.action, rule=probability_sum_constraint)
 
@@ -115,7 +115,7 @@ class Evaluator:
 
         opt = SolverFactory('ipopt')
         opt.options['max_iter'] = 5000
-        # opt.options['acceptable_tol'] = 0.0001
+        # opt.options['acceptable_tol'] = 0.000001
         opt.solve(model)
         # model.display()
         return model.OBJ()
@@ -158,9 +158,11 @@ class Evaluator:
         next_state_set = df[next_state_features]
         next_state_set.columns = state_features
         state_set = pd.concat([state_set, next_state_set]).drop_duplicates(ignore_index=True)
+        state_set.sort_values(state_features, inplace=True)
         action_set = horizon_set[action_features].drop_duplicates(ignore_index=True)
         # TODO make the terminal set be constructed of all state, not just the next state
         terminal_set = df[terminal_features].drop_duplicates(ignore_index=True)
+        terminal_set.sort_values(next_state_features, inplace=True)
         terminal = list(terminal_set["TERMINAL"])
         terminal.insert(0, False) # Add False as the starting state
         S = len(state_set)

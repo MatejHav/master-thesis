@@ -24,6 +24,7 @@ class QLearningAgent(Agent):
 
     def policy(self, state: Tensor) -> List[float]:
         prob = torch.nn.Softmax(dim=0)(self.q(state))
+        print(prob)
         return prob.detach().numpy()
 
     def learn(self, state: Tensor, action: Tensor, next_state: Tensor, reward: float, terminal: bool):
