@@ -112,7 +112,7 @@ def build_basic_mdp():
     """
     return build_maze(2, 2, default_r=-1, max_r=100, p=0)
 
-def build_2_phase_treatment_mdp():
+def build_2_phase_treatment_mdp(t):
     # Actions
     mdp_builder = (MDPBuilder("simple_mdp", 2, 1)
                    .add_action("T", [Constant(0, is_continuous=False)])
@@ -123,18 +123,18 @@ def build_2_phase_treatment_mdp():
     mdp_builder.add_constant_discrete_state("S1", [0, 1], 0)
     mdp_builder.add_constant_discrete_state("Bad", [1, 1], -1, terminal=True)
     mdp_builder.add_constant_discrete_state("Good", [1, 2], 1, terminal=True)
-    mdp_builder.connect_states("start", "S2", "C", lambda human: 0.5 if human[0] == 1 else 0.5)
-    mdp_builder.connect_states("start", "S1", "C", lambda human: 0.5 if human[0] == 1 else 0.5)
-    mdp_builder.connect_states("start", "S1", "T", lambda human: 0.2 if human[0] == 1 else 0.8)
-    mdp_builder.connect_states("start", "S2", "T", lambda human: 0.8 if human[0] == 1 else 0.2)
-    mdp_builder.connect_states("S1", "Bad", "C", lambda human: 0.9 if human[0] == 1 else 0.1)
-    mdp_builder.connect_states("S1", "Good", "C", lambda human: 0.1 if human[0] == 1 else 0.9)
-    mdp_builder.connect_states("S1", "Bad", "T", lambda human: 1 if human[0] == 1 else 0)
-    mdp_builder.connect_states("S1", "Good", "T", lambda human: 0 if human[0] == 1 else 1)
-    mdp_builder.connect_states("S2", "Bad", "C", lambda human: 0.2 if human[0] == 1 else 0.8)
-    mdp_builder.connect_states("S2", "Good", "C", lambda human: 0.8 if human[0] == 1 else 0.2)
-    mdp_builder.connect_states("S2", "Bad", "T", lambda human: 0.9 if human[0] == 1 else 0.1)
-    mdp_builder.connect_states("S2", "Good", "T", lambda human: 0.1 if human[0] == 1 else 0.9)
+    mdp_builder.connect_states("start", "S2", "C", lambda human: 0.5 if human[0] >= t else 0.5)
+    mdp_builder.connect_states("start", "S1", "C", lambda human: 0.5 if human[0] >= t else 0.5)
+    mdp_builder.connect_states("start", "S1", "T", lambda human: 0.2 if human[0] >= t else 0.8)
+    mdp_builder.connect_states("start", "S2", "T", lambda human: 0.8 if human[0] >= t else 0.2)
+    mdp_builder.connect_states("S1", "Bad", "C", lambda human: 0.9 if human[0] >= t else 0.1)
+    mdp_builder.connect_states("S1", "Good", "C", lambda human: 0.1 if human[0] >= t else 0.9)
+    mdp_builder.connect_states("S1", "Bad", "T", lambda human: 0.4 if human[0] >= t else 0.6)
+    mdp_builder.connect_states("S1", "Good", "T", lambda human: 0.6 if human[0] >= t else 0.4)
+    mdp_builder.connect_states("S2", "Bad", "C", lambda human: 0.2 if human[0] >= t else 0.8)
+    mdp_builder.connect_states("S2", "Good", "C", lambda human: 0.8 if human[0] >= t else 0.2)
+    mdp_builder.connect_states("S2", "Bad", "T", lambda human: 0.1 if human[0] >= t else 0.9)
+    mdp_builder.connect_states("S2", "Good", "T", lambda human: 0.9 if human[0] >= t else 0.1)
 
     mdp = mdp_builder.build()
     return mdp_builder, mdp

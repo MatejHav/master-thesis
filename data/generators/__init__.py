@@ -4,3 +4,4 @@ from data.generators.Function import *
 from data.generators.MDP import *
 from data.generators.Variable import *
 from data.generators.Generator import *
+from data.generators.RegularGenerator import *

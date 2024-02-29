@@ -29,7 +29,17 @@ class Value:
     def __repr__(self):
         return self.__str__()
 
+    def __le__(self, other):
+        return self.get_value() <= other
+
+    def __lt__(self, other):
+        return self.get_value() < other
+
+    def __ge__(self, other):
+        return self.get_value() >= other
+
+    def __gt__(self, other):
+        return self.get_value() > other
+
     def __eq__(self, other) -> bool:
-        if not type(other) == type(self):
-            return False
-        return self.value == other.value
+        return self.get_value() == other

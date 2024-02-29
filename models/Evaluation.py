@@ -96,8 +96,8 @@ class Evaluator:
         def value_function_constraint(model, state):
             if terminal[state]:
                 return model.V[state] == reward[state]
-            return model.V[state] - sum(
-                [agent_policy[state][action] * gamma * (reward[state] + sum([
+            return model.V[state] - reward[state] - sum(
+                [agent_policy[state][action] * gamma * (sum([
                         model.P[state, action, next_state] * model.V[next_state]
                      for next_state in model.state
                      ]))
@@ -118,6 +118,8 @@ class Evaluator:
         # opt.options['acceptable_tol'] = 0.000001
         opt.solve(model)
         # model.display()
+        # print(agent_policy)
+        # exit()
         return model.OBJ()
 
     def evaluate(self, data_path: str, agent: Agent, gamma: float, include_confounder: bool = True,

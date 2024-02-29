@@ -14,13 +14,16 @@ from models.Experiment import *
 
 
 def generate_data(path, human_features):
-    mdp_builder, mdp = build_2_phase_treatment_mdp()
+
     # mdp.visualize(max_iter=100)
     # if os.path.exists(path):
     #     return mdp, mdp_builder
 
     # Generator
-    behavioral_policy = lambda state, pos_actions, x: np.random.choice(pos_actions) if x[0] == 1 else np.random.choice(pos_actions, p=[0.75, 0.25])
+    delta = 0.5
+    t = 0
+    mdp_builder, mdp = build_2_phase_treatment_mdp(t)
+    behavioral_policy = lambda state, pos_actions, x: (lambda p1: np.random.choice(pos_actions, p=[p1, 1 - p1]))(np.exp(delta * (x[0]-t)) / (1 + np.exp(delta * (x[0]-t))))
     generator = Generator(mdp, human_features, behavioral_policy)
     df = generator.generate_uniform_data(num_of_rows=4000, n_jobs=16,
                                          starting_state=lambda _: mdp_builder.get_state("start"), max_iter=5,
@@ -45,15 +48,15 @@ def one_run(mdp, mdp_builder, agent, path, human_features, max_epochs=20):
 
 def main():
     # Human
-    F1 = Function(lambda: 1 if np.random.rand() >= 0.5 else 0)
+    F1 = Function(lambda: np.random.randn())
     X1 = Variable(F1)
     # X1 = Constant(1-0.025, is_continuous=False)
     human_features = [X1]
 
     # RL
 
-    total_runs = 10
-    max_epochs = 5
+    total_runs = 1
+    max_epochs = 1
     path = "csv_files/simple"
     agents = []
     all_losses = []
@@ -62,9 +65,10 @@ def main():
         mdp, builder = generate_data(path=temp_path, human_features=human_features)
         # agent1 = CustomAgent("Custom Agent1", pick_probability=lambda state: [0.01, 0.01, 0.01, 0.97] if state[0] == 3 else [0.01, 0.01, 0.97, 0.01])
         # agent2 = CustomAgent("Custom Agent2", pick_probability=lambda state: [0.97, 0.01, 0.01, 0.01] if state[1] == 0 else [0.01, 0.01, 0.97, 0.01])
-        agent2 = QLearningAgent(name="QLearner", state_size=mdp.state_size, actions=builder.action_list, alpha=0.01, gamma=0.95, hidden_dim=10, num_layers=2)
-        agent1 = CustomAgent("Custom Agent1", pick_probability=lambda state: [0.5, 0.5])
-        # agent2 = CustomAgent("Custom Agent2", pick_probability=lambda state: [0.8, 0.2])
+        # agent1 = QLearningAgent(name="QLearner", state_size=mdp.state_size, actions=builder.action_list, alpha=0.01, gamma=0.95, hidden_dim=10, num_layers=2)
+        # agent2 = CustomAgent("Custom Agent2", pick_probability=lambda state: [0.95, 0.05])
+        agent1 = CustomAgent("Custom Agent1", pick_probability=lambda state: [0.95, 0.05])
+        agent2 = CustomAgent("Custom Agent2", pick_probability=lambda state: [0.05, 0.95])
         exp1, _, losses1 = one_run(mdp, builder, agent1, temp_path, human_features=human_features, max_epochs=max_epochs)
         exp2, _, losses2 = one_run(mdp, builder, agent2, temp_path, human_features=human_features, max_epochs=max_epochs)
         agents.append((exp1.agent, exp2.agent))
@@ -72,7 +76,7 @@ def main():
 
     num_of_gammas = 20
     # Sensitivity analysis
-    gammas = np.linspace(1, 10, num_of_gammas)
+    gammas = np.linspace(1, 9, num_of_gammas)
     evaluator = Evaluator(0.025, 0.025)
     # Worst case
     res = []
