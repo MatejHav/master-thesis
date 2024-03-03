@@ -8,16 +8,16 @@ if __name__ == '__main__':
     n_jobs = 15
     sizes = {
         "U": 1,
-        "X": 4,
+        "X": 2,
         "T": 1,
         "Y": 1
     }
 
     # Generators
     u_gen = lambda noise: [np.random.randn() + 0.25 + noise]
-    x_gen = lambda u, noise: [np.random.rand() for _ in range(sizes["X"])]
+    x_gen = lambda u, noise: [int(2 * np.random.rand()) for _ in range(sizes["X"])]
     t_gen = lambda u, x, noise: [1 if u[0] + sum(x) / sizes["X"] >= 0.8 + noise else 0]
-    y_gen = lambda u, x, t, noise: [1 + sum(x) - 4 * u[0] + 4 * t[0] + noise]
+    y_gen = lambda u, x, t, noise: [int(0.2*(1 + sum(x) - 4 * u[0] + 4 * t[0] + noise))]
     generators = {
         "U": u_gen,
         "X": x_gen,
