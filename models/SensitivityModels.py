@@ -222,7 +222,7 @@ def bounds_creator(data, sensitivity_model, sensitivity_measure):
 
 
 if __name__ == '__main__':
-    p = "01"
+    p = "99"
     df = pd.read_csv(f"../csv_files/regular_{p}.csv")
     lower_res = []
     upper_res = []

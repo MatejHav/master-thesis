@@ -14,7 +14,7 @@ if __name__ == '__main__':
     }
 
     # Generators
-    u_gen = lambda noise: [1 if np.random.rand() >= 0.99 else 0]
+    u_gen = lambda noise: [1 if np.random.rand() >= 0.01 else 0]
     x_gen = lambda u, noise: [1 if np.random.rand() >= 0.5 else 0 for _ in range(sizes["X"])]
     t_gen = lambda u, x, noise: [1 if np.random.rand() + 0.2 * u[0] - 0.1 * x[0] >= 0.6 else 0]
     y_gen = lambda u, x, t, noise: [int(x[0] + u[0] + 2 * t[0])]
@@ -33,7 +33,7 @@ if __name__ == '__main__':
     }
 
     generator = RegularGenerator(generators=generators, noise_generators=noise, sizes=sizes)
-    path = "./csv_files/regular_01.csv"
+    path = "./csv_files/regular_99.csv"
     df = generator.generate(num_rows=n_rows, n_jobs=n_jobs, path=path)
     print(df.mean(axis=0))
 
