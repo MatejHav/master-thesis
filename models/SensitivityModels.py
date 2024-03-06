@@ -222,13 +222,13 @@ def bounds_creator(data, sensitivity_model, sensitivity_measure):
 
 
 if __name__ == '__main__':
-    p = "5"
+    p = "01"
     df = pd.read_csv(f"../csv_files/regular_{p}.csv")
     lower_res = []
     upper_res = []
     control = []
     treated = []
-    gammas = np.linspace(1, 10, 10)
+    gammas = np.linspace(1, 3, 10)
     for gamma in gammas:
         y_control, y_treated, lower_control, lower_treated, upper_control, upper_treated = bounds_creator(df,
                                                                                                           sensitivity_model='msm',
