@@ -27,7 +27,7 @@ def create_msm_model(data, gamma, treatement, is_lower_bound, alpha_prop, alpha_
 
     # Propensity scores
     all_data_frequency = all_data.groupby(x_features, as_index=False).size()
-    treated_data_frequency = all_data[all_data["T0"] == treatement].groupby(x_features, as_index=False).size()
+    treated_data_frequency = all_data[all_data["T0"] == 1].groupby(x_features, as_index=False).size()
     treated_data_frequency.rename(columns={"size": "treated_size"}, inplace=True)
     propensity_scores = pd.merge(all_data_frequency, treated_data_frequency, on=x_features, how='left')
     propensity_scores.fillna(0, inplace=True)
@@ -145,7 +145,7 @@ def create_f_sensitivity_model(data, rho, treatment, is_lower_bound, alpha_prop,
     # Data according to treated
     all_data = data
     p_treated = len(data[data["T0"] == treatment]) / len(all_data)
-    data = data[data["T0"] == treatment]
+    data = data[data["T0"] == 1]
     f = lambda t: t * log(t)
 
     # Get distinct x values - potentially group them
@@ -161,7 +161,7 @@ def create_f_sensitivity_model(data, rho, treatment, is_lower_bound, alpha_prop,
 
     # Propensity scores
     all_data_frequency = all_data.groupby(x_features, as_index=False).size()
-    treated_data_frequency = all_data[all_data["T0"] == treatment].groupby(x_features, as_index=False).size()
+    treated_data_frequency = all_data[all_data["T0"] == 1].groupby(x_features, as_index=False).size()
     treated_data_frequency.rename(columns={"size": "treated_size"}, inplace=True)
     propensity_scores = pd.merge(all_data_frequency, treated_data_frequency, on=x_features, how='left')
     propensity_scores.fillna(0, inplace=True)
@@ -292,7 +292,7 @@ def bounds_creator(data, sensitivity_model, sensitivity_measure):
 
 
 if __name__ == '__main__':
-    p = 0.99
+    p = 0.01
     df = pd.read_csv(f"../csv_files/regular_{int(100*p)}.csv")
     lower_res = []
     upper_res = []
