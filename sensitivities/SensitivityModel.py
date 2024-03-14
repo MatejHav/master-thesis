@@ -10,8 +10,9 @@ class SensitivityModel(ABC):
         self.data_min = data_minimum
         self.data = None
 
+    @staticmethod
     @abstractmethod
-    def sensitivity_measure(self, data: pd.DataFrame):
+    def sensitivity_measure(data: pd.DataFrame):
         return NotImplemented
 
     def load_data(self, data: pd.DataFrame):
