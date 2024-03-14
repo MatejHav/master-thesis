@@ -50,7 +50,7 @@ def thread_helper(y_index, t):
     for x_index in range(x_size):
         x = X.iloc[x_index]
         y = Y.iloc[y_index]
-        size_helper[(t, y_index, x_index)] = y_probabilities[np.all(y_probabilities["T0"] == t) &
+        size_helper[(t, y_index, x_index)] = y_probabilities[y_probabilities["T0"] == t &
         np.all(y_probabilities[x_features] == x[x_features], axis=1) & np.all(y_probabilities[["Y0"]] == y[["Y0"]],
                                                                               axis=1)]
 threads = []
@@ -64,6 +64,8 @@ for i in range(y_size):
     threads[-1].start()
 for thread in threads:
     thread.join()
+
+print(size_helper)
 def propensity(x_index, t):
     x = X.iloc[x_index]
     return \
