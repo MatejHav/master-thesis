@@ -12,84 +12,83 @@ import functools
 
 import pandas as pd
 
-print("START PREP...")
-p = 0
-# df = pd.read_csv(f"../csv_files/regular_{int(100*p)}.csv")
-all_data = pd.read_csv(f"../csv_files/data_adjusted.csv")
-# data = all_data[all_data["T0"] == treatement]
+from sklearn.linear_model import QuantileRegressor
 
-# Get distinct x values - potentially group them
-x_features = list(filter(lambda c: "X" in c, all_data.columns))
-X = all_data.groupby(x_features, as_index=False).size()
-x_size = len(X)
-X["prior"] = X["size"] / sum(X["size"])
+def create_msm_model(data, gamma, t, is_lower_bound):
+    all_data = data
+    # Get distinct x values - potentially group them
+    x_features = list(filter(lambda c: "X" in c, all_data.columns))
+    X = all_data.groupby(x_features, as_index=False).size()
+    x_size = len(X)
+    X["prior"] = X["size"] / sum(X["size"])
 
-# Get distinct y values - potentially group them
-Y = all_data.groupby(["Y0"], as_index=False).size()
-y_size = len(Y)
-Y["prior"] = Y["size"] / sum(Y["size"])
+    # Get distinct y values - potentially group them
+    Y = all_data.groupby(["Y0"], as_index=False).size()
+    y_size = len(Y)
+    Y["prior"] = Y["size"] / sum(Y["size"])
 
-# Propensity scores
-all_data_frequency = all_data.groupby(x_features, as_index=False).size()
-treated_data_frequency = all_data[all_data["T0"] == 1].groupby(x_features, as_index=False).size()
-treated_data_frequency.rename(columns={"size": "treated_size"}, inplace=True)
-propensity_scores = pd.merge(all_data_frequency, treated_data_frequency, on=x_features, how='left')
-propensity_scores.fillna(0, inplace=True)
-propensity_scores["propensity_score"] = propensity_scores["treated_size"] / propensity_scores["size"]
+    # Propensity scores
+    all_data_frequency = all_data.groupby(x_features, as_index=False).size()
+    treated_data_frequency = all_data[all_data["T0"] == 1].groupby(x_features, as_index=False).size()
+    treated_data_frequency.rename(columns={"size": "treated_size"}, inplace=True)
+    propensity_scores = pd.merge(all_data_frequency, treated_data_frequency, on=x_features, how='left')
+    propensity_scores.fillna(0, inplace=True)
+    propensity_scores["propensity_score"] = propensity_scores["treated_size"] / propensity_scores["size"]
 
-# Y Probabilities: P(Y| X, T)
-x_and_y_features = x_features.copy()
-x_and_y_features.append("Y0")
-x_and_y_features.append("T0")
-y_probabilities = all_data.groupby(x_and_y_features, as_index=False).size()
-y_probabilities["probability"] = y_probabilities["size"] / sum(y_probabilities["size"])
-n = sum(y_probabilities["size"])
+    # Y Probabilities: P(Y| X, T)
+    x_and_y_features = x_features.copy()
+    x_and_y_features.append("Y0")
+    x_and_y_features.append("T0")
+    y_probabilities = all_data.groupby(x_and_y_features, as_index=False).size()
+    y_probabilities["probability"] = y_probabilities["size"] / sum(y_probabilities["size"])
+    n = sum(y_probabilities["size"])
 
-size_helper = {}
-def thread_helper(y_index, t):
-    for x_index in range(x_size):
+    size_helper = {}
+
+    def thread_helper(y_index, t):
+        for x_index in range(x_size):
+            x = X.iloc[x_index]
+            y = Y.iloc[y_index]
+            size_helper[(t, y_index, x_index)] = y_probabilities[y_probabilities["T0"] == t &
+                                                                 np.all(y_probabilities[x_features] == x[x_features],
+                                                                        axis=1) & np.all(
+                y_probabilities[["Y0"]] == y[["Y0"]],
+                axis=1)]
+
+    threads = []
+    for i in range(y_size):
+        threads.append(threading.Thread(target=thread_helper, args=[i, 0]))
+        threads[-1].start()
+    for thread in threads:
+        thread.join()
+    for i in range(y_size):
+        threads.append(threading.Thread(target=thread_helper, args=[i, 1]))
+        threads[-1].start()
+    for thread in threads:
+        thread.join()
+
+    def propensity(x_index, t):
         x = X.iloc[x_index]
-        y = Y.iloc[y_index]
-        size_helper[(t, y_index, x_index)] = y_probabilities[y_probabilities["T0"] == t &
-        np.all(y_probabilities[x_features] == x[x_features], axis=1) & np.all(y_probabilities[["Y0"]] == y[["Y0"]],
-                                                                              axis=1)]
-threads = []
-for i in range(y_size):
-    threads.append(threading.Thread(target=thread_helper, args=[i, 0]))
-    threads[-1].start()
-for thread in threads:
-    thread.join()
-for i in range(y_size):
-    threads.append(threading.Thread(target=thread_helper, args=[i, 1]))
-    threads[-1].start()
-for thread in threads:
-    thread.join()
+        return \
+            propensity_scores[np.all(propensity_scores[x_features] == x[x_features], axis=1)]["propensity_score"].iloc[
+                0]
 
-print(size_helper)
-def propensity(x_index, t):
-    x = X.iloc[x_index]
-    return \
-    propensity_scores[np.all(propensity_scores[x_features] == x[x_features], axis=1)]["propensity_score"].iloc[0]
+    def p(y_index, x_index, t):
+        x = X.iloc[x_index]
+        selection = size_helper[(t, y_index, x_index)]
+        if len(selection) == 0:
+            return 0
+        return selection["size"].iloc[0] / x["size"]
 
-def p(y_index, x_index, t):
-    x = X.iloc[x_index]
-    selection = size_helper[(t, y_index, x_index)]
-    if len(selection) == 0:
-        return 0
-    return selection["size"].iloc[0] / x["size"]
+    def size(y_index, x_index, t):
+        selection = size_helper[(t, y_index, x_index)]
+        if len(selection) == 0:
+            return 0
+        return selection["size"].iloc[0]
 
-def size(y_index, x_index, t):
-    selection = size_helper[(t, y_index, x_index)]
-    if len(selection) == 0:
-        return 0
-    return selection["size"].iloc[0]
+    def get_value(y):
+        return Y.iloc[y]["Y0"]
 
-def get_value(y):
-    return Y.iloc[y]["Y0"]
-
-print("PREP FINISHED.")
-
-def create_msm_model(gamma, t, is_lower_bound):
     start_time = time.time()
     model = ConcreteModel(name="MarginalSensitivityModel")
     model.X = RangeSet(0, x_size - 1)
@@ -131,7 +130,96 @@ def create_msm_model(gamma, t, is_lower_bound):
     return model.OBJ()
 
 
+def closed_form_msm(data, gamma, is_lower_bound):
+    x_features = list(filter(lambda c: 'X' in c, data.columns))
+    tau = gamma / (gamma + 1)
+    if is_lower_bound:
+        tau = 1 - tau
+    regressor = QuantileRegressor(quantile=tau, solver='highs')
+    regressor.fit(data[x_features], data["Y0"])
+    X = data[x_features]
+    Y = data["Y0"].to_numpy()
+    pred = regressor.predict(X)
+    res = 1/gamma * Y + (1 - 1/gamma) * (pred + 1/(1-tau) * (Y - pred))
+    return res.mean()
+
+
+
 def create_f_sensitivity_model(data, rho, treatment, is_lower_bound):
+    all_data = data
+    # Get distinct x values - potentially group them
+    x_features = list(filter(lambda c: "X" in c, all_data.columns))
+    X = all_data.groupby(x_features, as_index=False).size()
+    x_size = len(X)
+    X["prior"] = X["size"] / sum(X["size"])
+
+    # Get distinct y values - potentially group them
+    Y = all_data.groupby(["Y0"], as_index=False).size()
+    y_size = len(Y)
+    Y["prior"] = Y["size"] / sum(Y["size"])
+
+    # Propensity scores
+    all_data_frequency = all_data.groupby(x_features, as_index=False).size()
+    treated_data_frequency = all_data[all_data["T0"] == 1].groupby(x_features, as_index=False).size()
+    treated_data_frequency.rename(columns={"size": "treated_size"}, inplace=True)
+    propensity_scores = pd.merge(all_data_frequency, treated_data_frequency, on=x_features, how='left')
+    propensity_scores.fillna(0, inplace=True)
+    propensity_scores["propensity_score"] = propensity_scores["treated_size"] / propensity_scores["size"]
+
+    # Y Probabilities: P(Y| X, T)
+    x_and_y_features = x_features.copy()
+    x_and_y_features.append("Y0")
+    x_and_y_features.append("T0")
+    y_probabilities = all_data.groupby(x_and_y_features, as_index=False).size()
+    y_probabilities["probability"] = y_probabilities["size"] / sum(y_probabilities["size"])
+    n = sum(y_probabilities["size"])
+
+    size_helper = {}
+
+    def thread_helper(y_index, t):
+        for x_index in range(x_size):
+            x = X.iloc[x_index]
+            y = Y.iloc[y_index]
+            size_helper[(t, y_index, x_index)] = y_probabilities[y_probabilities["T0"] == t &
+                                                                 np.all(y_probabilities[x_features] == x[x_features],
+                                                                        axis=1) & np.all(
+                y_probabilities[["Y0"]] == y[["Y0"]],
+                axis=1)]
+
+    threads = []
+    for i in range(y_size):
+        threads.append(threading.Thread(target=thread_helper, args=[i, 0]))
+        threads[-1].start()
+    for thread in threads:
+        thread.join()
+    for i in range(y_size):
+        threads.append(threading.Thread(target=thread_helper, args=[i, 1]))
+        threads[-1].start()
+    for thread in threads:
+        thread.join()
+
+    def propensity(x_index, t):
+        x = X.iloc[x_index]
+        return \
+            propensity_scores[np.all(propensity_scores[x_features] == x[x_features], axis=1)]["propensity_score"].iloc[
+                0]
+
+    def p(y_index, x_index, t):
+        x = X.iloc[x_index]
+        selection = size_helper[(t, y_index, x_index)]
+        if len(selection) == 0:
+            return 0
+        return selection["size"].iloc[0] / x["size"]
+
+    def size(y_index, x_index, t):
+        selection = size_helper[(t, y_index, x_index)]
+        if len(selection) == 0:
+            return 0
+        return selection["size"].iloc[0]
+
+    def get_value(y):
+        return Y.iloc[y]["Y0"]
+
     # Data according to treated
     all_data = data
     p_treated = len(data[data["T0"] == 1]) / len(all_data)
@@ -229,24 +317,32 @@ def create_f_sensitivity_model(data, rho, treatment, is_lower_bound):
     return model.OBJ()
 
 
-def bounds_creator(sensitivity_model, sensitivity_measure):
+def bounds_creator(data, sensitivity_model, sensitivity_measure):
     sensitivity = (lambda t, l: create_msm_model(gamma=sensitivity_measure, t=t, is_lower_bound=l)) \
         if sensitivity_model == 'msm' else \
-        lambda t, l: create_f_sensitivity_model(all_data, rho=sensitivity_measure, treatment=t, is_lower_bound=l)
+        lambda t, l: create_f_sensitivity_model(data, rho=sensitivity_measure, treatment=t, is_lower_bound=l)
     lower_control_bound = sensitivity(0, True)
     lower_treated_bound = sensitivity(1, True)
     upper_control_bound = sensitivity(0, False)
     upper_treated_bound = sensitivity(1, False)
 
     # Get data parameters for ATE
-    average_y_control = all_data[all_data["T0"] == 0]["Y0"].mean()
-    average_y_treated = all_data[all_data["T0"] == 1]["Y0"].mean()
+    average_y_control = data[data["T0"] == 0]["Y0"].mean()
+    average_y_treated = data[data["T0"] == 1]["Y0"].mean()
 
     # Compute the bounds
     return average_y_control, average_y_treated, lower_control_bound, lower_treated_bound, upper_control_bound, upper_treated_bound
 
 
 if __name__ == '__main__':
+    p = 0
+    df = pd.read_csv("../csv_files/data_u5_x16_t16_y50.csv")
+
+    lower = closed_form_msm(df, gamma=1.5, is_lower_bound=True)
+    upper = closed_form_msm(df, gamma=1.5, is_lower_bound=False)
+    print(lower, upper, upper - lower)
+    exit()
+
     lower_res = []
     upper_res = []
     control = []
@@ -254,7 +350,7 @@ if __name__ == '__main__':
     gammas = np.linspace(1, 9, 10)
     for gamma in gammas:
         print(gamma)
-        y_control, y_treated, lower_control, lower_treated, upper_control, upper_treated = bounds_creator(
+        y_control, y_treated, lower_control, lower_treated, upper_control, upper_treated = bounds_creator(df,
                                                                                                         sensitivity_model='msm',
                                                                                                           sensitivity_measure=gamma)
         lower_res.append(0.1 * (lower_treated - upper_control))
@@ -289,8 +385,6 @@ if __name__ == '__main__':
     plt.legend()
     plt.savefig(f"../msm_treated_{int(100*p)}_{len(df)}.png")
     plt.show()
-
-    exit()
 
     # F-sensitivity
     lower_res = []

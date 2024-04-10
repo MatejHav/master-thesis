@@ -24,7 +24,7 @@ def create_generator(u_prob, x_effect, t_effect, y_effect):
     u_gen = lambda noise: [0 if np.random.rand() >= u_prob else 1]
     x_gen = lambda u, noise: [0 if np.random.rand() >= x_effect * u[0] + base_x_prob else 1 for _ in range(sizes["X"])]
     t_gen = lambda u, x, noise: [0 if np.random.rand() >= t_effect * u[0] - 0.1 * x[0] + base_t_prob else 1]
-    y_gen = lambda u, x, t, noise: [x[0] + y_effect * u[0] + 2 * t[0]]
+    y_gen = lambda u, x, t, noise: [x[0] + y_effect * u[0] + 2 * t[0] + noise]
     generators = {
         "U": u_gen,
         "X": x_gen,
@@ -36,7 +36,7 @@ def create_generator(u_prob, x_effect, t_effect, y_effect):
         "U": lambda: 0,
         "X": lambda: 0,
         "T": lambda: 0,
-        "Y": lambda: 0
+        "Y": lambda: np.random.choice(np.arange(-2, 2, 1))
     }
 
     generator = RegularGenerator(generators=generators, noise_generators=noise, sizes=sizes)
@@ -92,6 +92,10 @@ if __name__ == '__main__':
     rosenbaum_metrics = {}
     msm = MarginalSensitivityModel("Marginal Sensitivity Model")
     msm_metrics = {}
+    fmsm = FMarginalSensitivityModel("MSM with f-divergence")
+    fmsm_metrics = {}
+    fdmsm = FdMarginalSensitivityModel("MSM with f-divergence in derivative")
+    fdmsm_metrics = {}
     fm = FSensitivityModel("f-sensitivity Model", lambda t: t * np.log(t))
     fm_metrics = {}
     ps = np.linspace(0.05, 0.95, 5)
@@ -111,6 +115,10 @@ if __name__ == '__main__':
                     msm_metrics[setting] = msm_metric
                     fm_metric = fm.sensitivity_measure(df)
                     fm_metrics[setting] = fm_metric
+                    fmsm_metric = fmsm.sensitivity_measure(df)
+                    fmsm_metrics[setting] = fmsm_metric
+                    fdmsm_metric = fdmsm.sensitivity_measure(df)
+                    fdmsm_metrics[setting] = fdmsm_metric
                     bar.update()
     fig, ax = plt.subplots()
     r = 0.05
@@ -181,9 +189,13 @@ if __name__ == '__main__':
     plt.show()
 
     # Plot rosenbaum sensitivity distribution
-    plot_setting_distribution(rosenbaum_metrics, "Γ")
+    # plot_setting_distribution(rosenbaum_metrics, "Γ")
     plot_setting_distribution(rosenbaum_metrics, "Γ", logscale=True)
-    plot_setting_distribution(msm_metrics, "Λ")
+    # plot_setting_distribution(msm_metrics, "Λ")
     plot_setting_distribution(msm_metrics, "Λ", logscale=True)
-    plot_setting_distribution(fm_metrics, "ρ")
+    # plot_setting_distribution(fm_metrics, "ρ")
     plot_setting_distribution(fm_metrics, "ρ", logscale=True)
+    # plot_setting_distribution(fmsm_metrics, "Γ")
+    plot_setting_distribution(fmsm_metrics, "Γ", logscale=True)
+    # plot_setting_distribution(fdmsm_metrics, "Γ")
+    plot_setting_distribution(fdmsm_metrics, "Γ", logscale=True)

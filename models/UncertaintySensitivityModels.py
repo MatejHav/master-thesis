@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 
 
-def create_msm_model(data, gamma, treatement, is_lower_bound, alpha_prop, alpha_prob):
+def create_uncertain_msm_model(data, gamma, treatement, is_lower_bound, alpha_prop, alpha_prob):
     # Data according to treated
     all_data = data
     data = data[data["T0"] == treatement]
@@ -141,7 +141,7 @@ def create_msm_model(data, gamma, treatement, is_lower_bound, alpha_prop, alpha_
     return model.OBJ()
 
 
-def create_f_sensitivity_model(data, rho, treatment, is_lower_bound, alpha_prop, alpha_prob):
+def create_uncertain_f_sensitivity_model(data, rho, treatment, is_lower_bound, alpha_prop, alpha_prob):
     # Data according to treated
     all_data = data
     p_treated = len(data[data["T0"] == treatment]) / len(all_data)
@@ -274,10 +274,10 @@ def create_f_sensitivity_model(data, rho, treatment, is_lower_bound, alpha_prop,
     return model.OBJ()
 
 
-def bounds_creator(data, sensitivity_model, sensitivity_measure):
-    sensitivity = (lambda t, l: create_msm_model(data, gamma=sensitivity_measure, treatement=t, is_lower_bound=l, alpha_prop=0.025, alpha_prob=0.025)) \
+def uncertain_bounds_creator(data, sensitivity_model, sensitivity_measure, delta=0.05):
+    sensitivity = (lambda t, l: create_uncertain_msm_model(data, gamma=sensitivity_measure, treatement=t, is_lower_bound=l, alpha_prop=delta/2, alpha_prob=delta/2)) \
         if sensitivity_model == 'msm' else \
-        lambda t, l: create_f_sensitivity_model(data, rho=sensitivity_measure, treatment=t, is_lower_bound=l, alpha_prop=0.025, alpha_prob=0.025)
+        lambda t, l: create_uncertain_f_sensitivity_model(data, rho=sensitivity_measure, treatment=t, is_lower_bound=l, alpha_prop=delta/2, alpha_prob=delta/2)
     lower_control_bound = sensitivity(0, True)
     lower_treated_bound = sensitivity(1, True)
     upper_control_bound = sensitivity(0, False)
@@ -300,7 +300,7 @@ if __name__ == '__main__':
     treated = []
     gammas = np.linspace(1, 3, 10)
     for gamma in gammas:
-        y_control, y_treated, lower_control, lower_treated, upper_control, upper_treated = bounds_creator(df,
+        y_control, y_treated, lower_control, lower_treated, upper_control, upper_treated = uncertain_bounds_creator(df,
                                                                                                           sensitivity_model='msm',
                                                                                                           sensitivity_measure=gamma)
         lower_res.append(lower_treated - upper_control)
@@ -343,7 +343,7 @@ if __name__ == '__main__':
     rhos = np.linspace(0, 0.3, 10)
     p_treated = len(df[df["T0"] == 1]) / len(df)
     for rho in rhos:
-        y_control, y_treated, lower_control, lower_treated, upper_control, upper_treated = bounds_creator(df,
+        y_control, y_treated, lower_control, lower_treated, upper_control, upper_treated = uncertain_bounds_creator(df,
                                                                                                           sensitivity_model='f',
                                                                                                           sensitivity_measure=rho)
         lower_res.append(lower_treated - upper_control)
