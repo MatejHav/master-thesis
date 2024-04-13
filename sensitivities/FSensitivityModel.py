@@ -62,6 +62,10 @@ class FSensitivityModel(SensitivityModel):
             worst_metric = max(worst_metric, rho, rho_inv)
         return worst_metric
 
-
     def find_bound(self, sensitivity_measure: float, delta: float, data_uncertainty: bool):
-        pass
+        assert self.data is not None, "Load data first."
+        if data_uncertainty:
+            return models.uncertain_bounds_creator(self.data, sensitivity_measure=sensitivity_measure,
+                                                   sensitivity_model='fs', delta=delta)
+        return models.SensitivityModels.bounds_creator(self.data, sensitivity_measure=sensitivity_measure,
+                                                       sensitivity_model='fs')

@@ -4,6 +4,7 @@ import threading
 import time
 
 import pyomo.core
+import torch.optim
 from pyomo.core import *
 from pyomo.environ import *
 import numpy as np
@@ -13,6 +14,8 @@ import functools
 import pandas as pd
 
 from sklearn.linear_model import QuantileRegressor
+from tqdm import tqdm
+
 
 def create_msm_model(data, gamma, t, is_lower_bound):
     all_data = data
@@ -97,20 +100,22 @@ def create_msm_model(data, gamma, t, is_lower_bound):
 
     # Constraint 1: Lambda is a distribution of Y | X, T
     def distribution_constraint(model):
-        return sum([sum(model.lam[x, y] * size(y ,x, t) for y in model.Y) for x in model.X]) / n == 1
+        return sum([sum(model.lam[x, y] * size(y, x, t) for y in model.Y) for x in model.X]) / n == 1
 
     model.c1 = Constraint(rule=distribution_constraint)
 
     # Constraint 2: Propensity scores remains unchanged
     def propensity_constraint(model):
-        return sum([sum([propensity(x, t) * model.lam[x, y] * size(y, x, t) for y in model.Y]) for x in model.X]) / n == sum(
+        return sum(
+            [sum([propensity(x, t) * model.lam[x, y] * size(y, x, t) for y in model.Y]) for x in model.X]) / n == sum(
             [sum([propensity(x, t) * size(y, x, t) for y in model.Y]) for x in model.X]) / n
 
     model.c2 = Constraint(rule=propensity_constraint)
 
     # Constraint 3: Distribution of Y unchanged
     def p_constraint(model):
-        return sum([sum([p(y, x, t) * model.lam[x, y] * X.iloc[x]["size"] for x in model.X]) / sum(X["size"]) for y in model.Y]) == sum([sum(
+        return sum([sum([p(y, x, t) * model.lam[x, y] * X.iloc[x]["size"] for x in model.X]) / sum(X["size"]) for y in
+                    model.Y]) == sum([sum(
             [p(y, x, t) * X.iloc[x]["size"] for x in model.X]) / sum(X["size"]) for y in model.Y])
 
     model.c3 = Constraint(rule=p_constraint)
@@ -140,9 +145,32 @@ def closed_form_msm(data, gamma, is_lower_bound):
     X = data[x_features]
     Y = data["Y0"].to_numpy()
     pred = regressor.predict(X)
-    res = 1/gamma * Y + (1 - 1/gamma) * (pred + 1/(1-tau) * (Y - pred))
+    res = 1 / gamma * Y + (1 - 1 / gamma) * (pred + 1 / (1 - tau) * (Y - pred))
     return res.mean()
 
+
+def closed_form_f_sensitivity(data, rho, treatment, is_lower_bound, eps=1e-8):
+    data = data[data["T0"] == treatment]
+    outcomes = torch.DoubleTensor(data["Y0"].to_numpy())
+    N = len(outcomes)
+    alpha = np.exp(-rho)
+    z = torch.nn.Parameter(torch.ones(1, dtype=torch.double) * (-1 if is_lower_bound else 1))
+    evar = lambda z: (torch.logsumexp(z * outcomes, 0) - np.log(N * alpha)) / z
+    optimizer = torch.optim.SGD([z], lr=0.01, maximize=is_lower_bound)
+    previous = None
+    # Until converged
+    while previous is None or abs((previous - z).item()) > eps:
+        if (z.item() < 0 and not is_lower_bound) or (z.item() > 0 and is_lower_bound):
+            return min(outcomes.max().item(), evar(previous).item()) if not is_lower_bound else\
+                max(outcomes.min().item(), evar(previous).item())
+        previous = z
+        optimizer.zero_grad()
+        # Definition from EVaR
+        loss = evar(z)
+        loss.backward()
+        optimizer.step()
+    return min(outcomes.max().item(), evar(z).item()) if not is_lower_bound else\
+        max(outcomes.min().item(), evar(z).item())
 
 
 def create_f_sensitivity_model(data, rho, treatment, is_lower_bound):
@@ -254,7 +282,8 @@ def create_f_sensitivity_model(data, rho, treatment, is_lower_bound):
 
     def propensity(x_index):
         x = X.iloc[x_index]
-        return propensity_scores[np.all(propensity_scores[x_features] == x[x_features], axis=1)]["propensity_score"].iloc[0]
+        return \
+        propensity_scores[np.all(propensity_scores[x_features] == x[x_features], axis=1)]["propensity_score"].iloc[0]
 
     def size(y_index, x_index):
         x = X.iloc[x_index]
@@ -334,14 +363,18 @@ def bounds_creator(data, sensitivity_model, sensitivity_measure):
     return average_y_control, average_y_treated, lower_control_bound, lower_treated_bound, upper_control_bound, upper_treated_bound
 
 
-if __name__ == '__main__':
+def main():
     p = 0
     df = pd.read_csv("../csv_files/data_u5_x16_t16_y50.csv")
 
-    lower = closed_form_msm(df, gamma=1.5, is_lower_bound=True)
-    upper = closed_form_msm(df, gamma=1.5, is_lower_bound=False)
-    print(lower, upper, upper - lower)
-    exit()
+    # lower = closed_form_msm(df, gamma=1.5, is_lower_bound=True)
+    # upper = closed_form_msm(df, gamma=1.5, is_lower_bound=False)
+    # print(lower, upper, upper - lower)
+    # lower_treated = closed_form_f_sensitivity(df, 0.4, 1, True)
+    # upper_treated = closed_form_f_sensitivity(df, 0.4, 1, False)
+    # lower_control = closed_form_f_sensitivity(df, 0.4, 0, True)
+    # upper_control = closed_form_f_sensitivity(df, 0.4, 0, False)
+    # print(lower_control, upper_control, lower_treated, upper_treated)
 
     lower_res = []
     upper_res = []
@@ -351,7 +384,7 @@ if __name__ == '__main__':
     for gamma in gammas:
         print(gamma)
         y_control, y_treated, lower_control, lower_treated, upper_control, upper_treated = bounds_creator(df,
-                                                                                                        sensitivity_model='msm',
+                                                                                                          sensitivity_model='msm',
                                                                                                           sensitivity_measure=gamma)
         lower_res.append(0.1 * (lower_treated - upper_control))
         upper_res.append(0.1 * (upper_treated - lower_control))
@@ -367,7 +400,7 @@ if __name__ == '__main__':
     plt.ylabel('ATE')
     # plt.ylim(1, 3)
     plt.legend()
-    plt.savefig(f"../msm_ate_{int(100*p)}_{len(df)}.png")
+    plt.savefig(f"../msm_ate_{int(100 * p)}_{len(df)}.png")
     plt.show()
     plt.plot(gammas, control[:, 0], label='lower bound')
     plt.plot(gammas, control[:, 1], label='upper bound')
@@ -375,7 +408,7 @@ if __name__ == '__main__':
     plt.xlabel('Gamma')
     plt.ylabel('E[Y | T=0]')
     plt.legend()
-    plt.savefig(f"../msm_control_{int(100*p)}_{len(df)}.png")
+    plt.savefig(f"../msm_control_{int(100 * p)}_{len(df)}.png")
     plt.show()
     plt.plot(gammas, treated[:, 0], label='lower bound')
     plt.plot(gammas, treated[:, 1], label='upper bound')
@@ -383,7 +416,7 @@ if __name__ == '__main__':
     plt.xlabel('Gamma')
     plt.ylabel('E[Y | T=1]')
     plt.legend()
-    plt.savefig(f"../msm_treated_{int(100*p)}_{len(df)}.png")
+    plt.savefig(f"../msm_treated_{int(100 * p)}_{len(df)}.png")
     plt.show()
 
     # F-sensitivity
@@ -410,7 +443,7 @@ if __name__ == '__main__':
     plt.ylabel('ATE')
     plt.ylim(1, 3)
     plt.legend()
-    plt.savefig(f"../fm_ate_{int(100*p)}_{len(df)}.png")
+    plt.savefig(f"../fm_ate_{int(100 * p)}_{len(df)}.png")
     plt.show()
     plt.plot(rhos, control[:, 0], label='lower bound')
     plt.plot(rhos, control[:, 1], label='upper bound')
@@ -418,7 +451,7 @@ if __name__ == '__main__':
     plt.xlabel('Rho')
     plt.ylabel('E[Y | T=0]')
     plt.legend()
-    plt.savefig(f"../fm_control_{int(100*p)}_{len(df)}.png")
+    plt.savefig(f"../fm_control_{int(100 * p)}_{len(df)}.png")
     plt.show()
     plt.plot(rhos, treated[:, 0], label='lower bound')
     plt.plot(rhos, treated[:, 1], label='upper bound')
@@ -426,5 +459,37 @@ if __name__ == '__main__':
     plt.xlabel('Rho')
     plt.ylabel('E[Y | T=1]')
     plt.legend()
-    plt.savefig(f"../fm_treated_{int(100*p)}_{len(df)}.png")
+    plt.savefig(f"../fm_treated_{int(100 * p)}_{len(df)}.png")
+    plt.show()
+
+
+if __name__ == '__main__':
+    df = pd.read_csv("../csv_files/data_adjusted.csv")
+    rhos = np.linspace(0, 2, 20)
+    f_upper = []
+    f_lower = []
+    closed_f_upper = []
+    closed_f_lower = []
+    for rho in tqdm(rhos):
+        # y_control, y_treated, lower_control, lower_treated, upper_control, upper_treated = bounds_creator(df,
+        #                                                                                                   sensitivity_model='f',
+        #                                                                                                   sensitivity_measure=rho)
+        # f_upper.append(upper_treated - lower_control)
+        # f_lower.append(lower_treated - upper_control)
+        # Closed f sensitivity
+        lower_treated = 0.1 * closed_form_f_sensitivity(df, rho, 1, True)
+        upper_treated = 0.1 * closed_form_f_sensitivity(df, rho, 1, False)
+        lower_control = 0.1 * closed_form_f_sensitivity(df, rho, 0, True)
+        upper_control = 0.1 * closed_form_f_sensitivity(df, rho, 0, False)
+        print(lower_control, upper_control, lower_treated, upper_treated)
+        closed_f_upper.append(upper_treated - lower_control)
+        closed_f_lower.append(lower_treated - upper_control)
+    # plt.plot(rhos, f_upper, color='red', label='Constraint')
+    # plt.plot(rhos, f_lower, color='red')
+    plt.plot(rhos, closed_f_upper, color='blue', label='Closed')
+    plt.plot(rhos, closed_f_lower, color='blue')
+    plt.legend()
+    plt.xlabel('Rho')
+    plt.ylabel('ATE')
+    plt.title('Comparison between closed form and constraints form of f-sensitivity')
     plt.show()
