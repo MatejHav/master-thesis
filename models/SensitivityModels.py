@@ -130,12 +130,12 @@ def create_msm_model(data, gamma, t, is_lower_bound):
     opt = SolverFactory('glpk')
     opt.options['tmlim'] = 100
     opt.solve(model)
-    print(f"End: {time.time() - start_time}")
     # model.display()
     return model.OBJ()
 
 
-def closed_form_msm(data, gamma, is_lower_bound):
+def closed_form_msm(data, gamma, treatment, is_lower_bound):
+    data = data[data["T0"] == treatment]
     x_features = list(filter(lambda c: 'X' in c, data.columns))
     tau = gamma / (gamma + 1)
     if is_lower_bound:
@@ -149,105 +149,66 @@ def closed_form_msm(data, gamma, is_lower_bound):
     return res.mean()
 
 
-def closed_form_f_sensitivity(data, rho, treatment, is_lower_bound, eps=1e-8):
-    data = data[data["T0"] == treatment]
-    outcomes = torch.DoubleTensor(data["Y0"].to_numpy())
-    N = len(outcomes)
-    alpha = np.exp(-rho)
+def evar(exponents, alpha, is_lower_bound, eps=1e-10):
+    N = len(exponents)
     z = torch.nn.Parameter(torch.ones(1, dtype=torch.double) * (-1 if is_lower_bound else 1))
-    evar = lambda z: (torch.logsumexp(z * outcomes, 0) - np.log(N * alpha)) / z
-    optimizer = torch.optim.SGD([z], lr=0.01, maximize=is_lower_bound)
+    helper = lambda z: (torch.logsumexp(z * exponents, 0) - np.log(N * alpha)) / z
+    if alpha == 1:
+        return exponents.mean().item()
+    optimizer = torch.optim.SGD([z], lr=0.0000001, maximize=is_lower_bound)
     previous = None
     # Until converged
     while previous is None or abs((previous - z).item()) > eps:
         if (z.item() < 0 and not is_lower_bound) or (z.item() > 0 and is_lower_bound):
-            return min(outcomes.max().item(), evar(previous).item()) if not is_lower_bound else\
-                max(outcomes.min().item(), evar(previous).item())
+            return min(exponents.max().item(), helper(previous).item()) if not is_lower_bound else \
+                max(exponents.min().item(), helper(previous).item())
         previous = z
         optimizer.zero_grad()
         # Definition from EVaR
-        loss = evar(z)
+        loss = helper(z)
         loss.backward()
         optimizer.step()
-    return min(outcomes.max().item(), evar(z).item()) if not is_lower_bound else\
-        max(outcomes.min().item(), evar(z).item())
+    return min(exponents.max().item(), helper(z).item()) if not is_lower_bound else \
+        max(exponents.min().item(), helper(z).item())
+
+def closed_form_kl_sensitivity(data, rho, is_lower_bound):
+    alpha = np.exp(-rho)
+    result_treated = evar(torch.DoubleTensor(data[data["T0"] == 1]["Y0"].to_numpy()), alpha, is_lower_bound)
+    result_control = evar(torch.DoubleTensor(data[data["T0"] == 0]["Y0"].to_numpy()), alpha, not is_lower_bound)
+    return result_treated - result_control
+
+def closed_form_f_sensitivity(data, rho, is_lower_bound):
+    alpha = np.exp(-rho)
+    x_features = list(filter(lambda c: 'X' in c, data.columns))
+    xy_features = x_features.copy()
+    xy_features.append("Y0")
+    X = data.groupby(x_features, as_index=False).size()
+    propensity = len(data[data["T0"] == 1]) / len(data)
+    treated_data = data[data["T0"] == 1]
+    treated_X = treated_data.groupby(x_features, as_index=False).size()
+    treated_probability_of_x = treated_X["size"] / len(treated_data)
+    control_data = data[data["T0"] == 0]
+    control_X = control_data.groupby(x_features, as_index=False).size()
+    control_probability_of_x = control_X["size"] / len(control_data)
+    result_treated = 0
+    result_control = 0
+    for index, row in X.iterrows():
+        selection_on_x = data[data[x_features].eq(row[x_features]).all(axis=1)]
+        observed_propensity = selection_on_x['T0'].sum() / len(selection_on_x)
+        r_x = (1 - observed_propensity) * propensity / (observed_propensity * (1 - propensity))
+        # treated
+        exponents = torch.DoubleTensor(selection_on_x[selection_on_x["T0"] == 1]["Y0"].to_numpy())
+        treated_q = evar(exponents, alpha, is_lower_bound)
+        result_treated += 1/r_x * treated_probability_of_x[index] * treated_q
+        # control
+        exponents = torch.DoubleTensor(selection_on_x[selection_on_x["T0"] == 0]["Y0"].to_numpy())
+        control_q = evar(exponents, alpha, not is_lower_bound)
+        result_control += r_x * control_probability_of_x[index] * control_q
+    return result_treated - result_control
+
 
 
 def create_f_sensitivity_model(data, rho, treatment, is_lower_bound):
-    all_data = data
-    # Get distinct x values - potentially group them
-    x_features = list(filter(lambda c: "X" in c, all_data.columns))
-    X = all_data.groupby(x_features, as_index=False).size()
-    x_size = len(X)
-    X["prior"] = X["size"] / sum(X["size"])
-
-    # Get distinct y values - potentially group them
-    Y = all_data.groupby(["Y0"], as_index=False).size()
-    y_size = len(Y)
-    Y["prior"] = Y["size"] / sum(Y["size"])
-
-    # Propensity scores
-    all_data_frequency = all_data.groupby(x_features, as_index=False).size()
-    treated_data_frequency = all_data[all_data["T0"] == 1].groupby(x_features, as_index=False).size()
-    treated_data_frequency.rename(columns={"size": "treated_size"}, inplace=True)
-    propensity_scores = pd.merge(all_data_frequency, treated_data_frequency, on=x_features, how='left')
-    propensity_scores.fillna(0, inplace=True)
-    propensity_scores["propensity_score"] = propensity_scores["treated_size"] / propensity_scores["size"]
-
-    # Y Probabilities: P(Y| X, T)
-    x_and_y_features = x_features.copy()
-    x_and_y_features.append("Y0")
-    x_and_y_features.append("T0")
-    y_probabilities = all_data.groupby(x_and_y_features, as_index=False).size()
-    y_probabilities["probability"] = y_probabilities["size"] / sum(y_probabilities["size"])
-    n = sum(y_probabilities["size"])
-
-    size_helper = {}
-
-    def thread_helper(y_index, t):
-        for x_index in range(x_size):
-            x = X.iloc[x_index]
-            y = Y.iloc[y_index]
-            size_helper[(t, y_index, x_index)] = y_probabilities[y_probabilities["T0"] == t &
-                                                                 np.all(y_probabilities[x_features] == x[x_features],
-                                                                        axis=1) & np.all(
-                y_probabilities[["Y0"]] == y[["Y0"]],
-                axis=1)]
-
-    threads = []
-    for i in range(y_size):
-        threads.append(threading.Thread(target=thread_helper, args=[i, 0]))
-        threads[-1].start()
-    for thread in threads:
-        thread.join()
-    for i in range(y_size):
-        threads.append(threading.Thread(target=thread_helper, args=[i, 1]))
-        threads[-1].start()
-    for thread in threads:
-        thread.join()
-
-    def propensity(x_index, t):
-        x = X.iloc[x_index]
-        return \
-            propensity_scores[np.all(propensity_scores[x_features] == x[x_features], axis=1)]["propensity_score"].iloc[
-                0]
-
-    def p(y_index, x_index, t):
-        x = X.iloc[x_index]
-        selection = size_helper[(t, y_index, x_index)]
-        if len(selection) == 0:
-            return 0
-        return selection["size"].iloc[0] / x["size"]
-
-    def size(y_index, x_index, t):
-        selection = size_helper[(t, y_index, x_index)]
-        if len(selection) == 0:
-            return 0
-        return selection["size"].iloc[0]
-
-    def get_value(y):
-        return Y.iloc[y]["Y0"]
-
     # Data according to treated
     all_data = data
     p_treated = len(data[data["T0"] == 1]) / len(all_data)
@@ -299,7 +260,7 @@ def create_f_sensitivity_model(data, rho, treatment, is_lower_bound):
         return Y.iloc[y]["Y0"]
 
     def r(x):
-        return (1 - propensity(x)) * p_treated / (propensity(x) * (1 - p_treated))
+        return propensity(x) * (1 - p_treated) / ((1-propensity(x)) * p_treated)
 
     model = ConcreteModel(name="FSensitivityModel")
     model.X = RangeSet(0, x_size - 1)
@@ -308,27 +269,19 @@ def create_f_sensitivity_model(data, rho, treatment, is_lower_bound):
 
     # Constraint 1: Definition of R
     def r_constraint(model, x):
+        if treatment == 0:
+            return (1/r(x)) == sum([model.L[x, y] * size(y, x) for y in model.Y]) / X.iloc[x]["size"]
         return r(x) == sum([model.L[x, y] * size(y, x) for y in model.Y]) / X.iloc[x]["size"]
 
     model.c1 = Constraint(model.X, rule=r_constraint)
 
-    # # Constraint 2: R is a distribution
-    # def r_distribution_constraint(model):
-    #     return sum([model.R[x] for x in model.X]) == 1
-    #
-    # model.c2 = Constraint(rule=r_distribution_constraint)
-
     # Constraint 3: MSM assumption
     def f_constraint(model, x):
-        return sum([f(model.L[x, y] / r(x)) * size(y, x) for y in model.Y]) / X.iloc[x]["size"] <= rho
+        if treatment == 0:
+            return sum([log(model.L[x, y] * r(x)) * model.L[x, y] * r(x) * size(y, x) for y in model.Y]) / X.iloc[x]["size"] <= rho
+        return sum([log(model.L[x, y] / r(x)) * model.L[x, y] / r(x) * size(y, x) for y in model.Y]) / X.iloc[x]["size"] <= rho
 
     model.c3 = Constraint(model.X, rule=f_constraint)
-
-    # # Constraint 4: L distribution constraint
-    # def l_distribution_constraint(model):
-    #     return sum([sum([model.L[x, y] for y in model.Y]) for x in model.X]) / (x_size * y_size) == 1
-    #
-    # model.c4 = Constraint(rule=l_distribution_constraint)
 
     # Objective: E[Y * L(X, Y)]
     def objective_function(model):
@@ -346,8 +299,10 @@ def create_f_sensitivity_model(data, rho, treatment, is_lower_bound):
     return model.OBJ()
 
 
+
+
 def bounds_creator(data, sensitivity_model, sensitivity_measure):
-    sensitivity = (lambda t, l: create_msm_model(gamma=sensitivity_measure, t=t, is_lower_bound=l)) \
+    sensitivity = (lambda t, l: create_msm_model(data, gamma=sensitivity_measure, t=t, is_lower_bound=l)) \
         if sensitivity_model == 'msm' else \
         lambda t, l: create_f_sensitivity_model(data, rho=sensitivity_measure, treatment=t, is_lower_bound=l)
     lower_control_bound = sensitivity(0, True)
@@ -464,32 +419,60 @@ def main():
 
 
 if __name__ == '__main__':
-    df = pd.read_csv("../csv_files/data_adjusted.csv")
-    rhos = np.linspace(0, 2, 20)
+    df = pd.read_csv("../csv_files/data_u72_x50_t25_y50.csv")
+    # df = pd.read_csv("../csv_files/data_u72_x50_t25_y0.csv")
+    # df = pd.read_csv("../csv_files/data_u0_x16_t16_y50.csv")
+    # df = pd.read_csv("../csv_files/data_u15_x5_t38_y50.csv")
+    # df = pd.read_csv("../csv_files/data_u49_x-25_t-25_y-25.csv")
+    # df = pd.read_csv("../csv_files/data_adjusted.csv")
+    rhos = np.linspace(0, 5, 15)
     f_upper = []
     f_lower = []
     closed_f_upper = []
     closed_f_lower = []
+    closed_kl_upper = []
+    closed_kl_lower = []
+    f_time = []
+    closed_f_time = []
+    closed_kl_time = []
     for rho in tqdm(rhos):
-        # y_control, y_treated, lower_control, lower_treated, upper_control, upper_treated = bounds_creator(df,
-        #                                                                                                   sensitivity_model='f',
-        #                                                                                                   sensitivity_measure=rho)
-        # f_upper.append(upper_treated - lower_control)
-        # f_lower.append(lower_treated - upper_control)
+        start = time.time()
+        y_control, y_treated, lower_control, lower_treated, upper_control, upper_treated = bounds_creator(df,
+                                                                                                          sensitivity_model='f',
+                                                                                                          sensitivity_measure=rho)
+        f_upper.append(upper_treated - lower_control)
+        f_lower.append(lower_treated - upper_control)
+        f_time.append(time.time() - start)
+        start = time.time()
         # Closed f sensitivity
-        lower_treated = 0.1 * closed_form_f_sensitivity(df, rho, 1, True)
-        upper_treated = 0.1 * closed_form_f_sensitivity(df, rho, 1, False)
-        lower_control = 0.1 * closed_form_f_sensitivity(df, rho, 0, True)
-        upper_control = 0.1 * closed_form_f_sensitivity(df, rho, 0, False)
-        print(lower_control, upper_control, lower_treated, upper_treated)
-        closed_f_upper.append(upper_treated - lower_control)
-        closed_f_lower.append(lower_treated - upper_control)
-    # plt.plot(rhos, f_upper, color='red', label='Constraint')
-    # plt.plot(rhos, f_lower, color='red')
-    plt.plot(rhos, closed_f_upper, color='blue', label='Closed')
+        lower = closed_form_f_sensitivity(df, rho, True)
+        upper = closed_form_f_sensitivity(df, rho, False)
+        closed_f_upper.append(upper)
+        closed_f_lower.append(lower)
+        closed_f_time.append(time.time() - start)
+        start = time.time()
+        # Closed kl sensitivity
+        lower = closed_form_kl_sensitivity(df, rho, True)
+        upper = closed_form_kl_sensitivity(df, rho, False)
+        closed_kl_upper.append(upper)
+        closed_kl_lower.append(lower)
+        closed_kl_time.append(time.time() - start)
+    plt.plot(rhos, closed_kl_upper, color='black', label='Closed KL')
+    plt.plot(rhos, closed_kl_lower, color='black')
+    plt.plot(rhos, f_upper, color='red', label='Constraint F-sensitivity')
+    plt.plot(rhos, f_lower, color='red')
+    plt.plot(rhos, closed_f_upper, color='blue', label='Closed F-sensitivity')
     plt.plot(rhos, closed_f_lower, color='blue')
     plt.legend()
     plt.xlabel('Rho')
     plt.ylabel('ATE')
-    plt.title('Comparison between closed form and constraints form of f-sensitivity')
+    plt.title('Comparison between closed forms and constraints forms')
+    plt.show()
+    plt.plot(rhos, f_time, color='red', label='F-sensitivity')
+    plt.plot(rhos, closed_f_time, color='blue', label='Closed F-sensitivity')
+    plt.plot(rhos, closed_kl_time, color='black', label='Closed KL')
+    plt.legend()
+    plt.xlabel('Rho')
+    plt.ylabel('Time (s)')
+    plt.title('Comparison between times of closed forms and constraints forms')
     plt.show()
