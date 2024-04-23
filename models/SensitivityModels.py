@@ -19,14 +19,15 @@ from tqdm import tqdm
 
 def create_msm_model(data, gamma, t, is_lower_bound):
     all_data = data
+    data = data[data["T0"] == t]
     # Get distinct x values - potentially group them
-    x_features = list(filter(lambda c: "X" in c, all_data.columns))
-    X = all_data.groupby(x_features, as_index=False).size()
+    x_features = list(filter(lambda c: "X" in c, data.columns))
+    X = data.groupby(x_features, as_index=False).size()
     x_size = len(X)
     X["prior"] = X["size"] / sum(X["size"])
 
     # Get distinct y values - potentially group them
-    Y = all_data.groupby(["Y0"], as_index=False).size()
+    Y = data.groupby(["Y0"], as_index=False).size()
     y_size = len(Y)
     Y["prior"] = Y["size"] / sum(Y["size"])
 
@@ -42,52 +43,28 @@ def create_msm_model(data, gamma, t, is_lower_bound):
     x_and_y_features = x_features.copy()
     x_and_y_features.append("Y0")
     x_and_y_features.append("T0")
-    y_probabilities = all_data.groupby(x_and_y_features, as_index=False).size()
+    y_probabilities = data.groupby(x_and_y_features, as_index=False).size()
     y_probabilities["probability"] = y_probabilities["size"] / sum(y_probabilities["size"])
     n = sum(y_probabilities["size"])
 
-    size_helper = {}
-
-    def thread_helper(y_index, t):
-        for x_index in range(x_size):
-            x = X.iloc[x_index]
-            y = Y.iloc[y_index]
-            size_helper[(t, y_index, x_index)] = y_probabilities[y_probabilities["T0"] == t &
-                                                                 np.all(y_probabilities[x_features] == x[x_features],
-                                                                        axis=1) & np.all(
-                y_probabilities[["Y0"]] == y[["Y0"]],
-                axis=1)]
-
-    threads = []
-    for i in range(y_size):
-        threads.append(threading.Thread(target=thread_helper, args=[i, 0]))
-        threads[-1].start()
-    for thread in threads:
-        thread.join()
-    for i in range(y_size):
-        threads.append(threading.Thread(target=thread_helper, args=[i, 1]))
-        threads[-1].start()
-    for thread in threads:
-        thread.join()
-
-    def propensity(x_index, t):
+    def propensity(x_index):
         x = X.iloc[x_index]
         return \
-            propensity_scores[np.all(propensity_scores[x_features] == x[x_features], axis=1)]["propensity_score"].iloc[
-                0]
+        propensity_scores[np.all(propensity_scores[x_features] == x[x_features], axis=1)]["propensity_score"].iloc[0]
 
-    def p(y_index, x_index, t):
+    def size(y_index, x_index):
         x = X.iloc[x_index]
-        selection = size_helper[(t, y_index, x_index)]
-        if len(selection) == 0:
-            return 0
-        return selection["size"].iloc[0] / x["size"]
-
-    def size(y_index, x_index, t):
-        selection = size_helper[(t, y_index, x_index)]
+        y = Y.iloc[y_index]
+        selection = y_probabilities[
+            np.all(y_probabilities[x_features] == x[x_features], axis=1) & np.all(y_probabilities[["Y0"]] == y[["Y0"]],
+                                                                                  axis=1)]
         if len(selection) == 0:
             return 0
         return selection["size"].iloc[0]
+
+    def p(y_index, x_index):
+        x = X.iloc[x_index]
+        return size(y_index, x_index) / x["size"]
 
     def get_value(y):
         return Y.iloc[y]["Y0"]
@@ -100,29 +77,29 @@ def create_msm_model(data, gamma, t, is_lower_bound):
 
     # Constraint 1: Lambda is a distribution of Y | X, T
     def distribution_constraint(model):
-        return sum([sum(model.lam[x, y] * size(y, x, t) for y in model.Y) for x in model.X]) / n == 1
+        return sum([sum(model.lam[x, y] * size(y, x) for y in model.Y) for x in model.X]) / n == 1
 
     model.c1 = Constraint(rule=distribution_constraint)
 
     # Constraint 2: Propensity scores remains unchanged
     def propensity_constraint(model):
         return sum(
-            [sum([propensity(x, t) * model.lam[x, y] * size(y, x, t) for y in model.Y]) for x in model.X]) / n == sum(
-            [sum([propensity(x, t) * size(y, x, t) for y in model.Y]) for x in model.X]) / n
+            [sum([propensity(x) * model.lam[x, y] * size(y, x) for y in model.Y]) for x in model.X]) / n == sum(
+            [sum([propensity(x) * size(y, x) for y in model.Y]) for x in model.X]) / n
 
     model.c2 = Constraint(rule=propensity_constraint)
 
     # Constraint 3: Distribution of Y unchanged
     def p_constraint(model):
-        return sum([sum([p(y, x, t) * model.lam[x, y] * X.iloc[x]["size"] for x in model.X]) / sum(X["size"]) for y in
+        return sum([sum([p(y, x) * model.lam[x, y] * X.iloc[x]["size"] for x in model.X]) / sum(X["size"]) for y in
                     model.Y]) == sum([sum(
-            [p(y, x, t) * X.iloc[x]["size"] for x in model.X]) / sum(X["size"]) for y in model.Y])
+            [p(y, x) * X.iloc[x]["size"] for x in model.X]) / sum(X["size"]) for y in model.Y])
 
     model.c3 = Constraint(rule=p_constraint)
 
     # Objective: Find the bound
     def objective_function(model):
-        return sum([sum([get_value(y) * model.lam[x, y] * size(y, x, t) for y in model.Y]) for x in model.X]) / n
+        return sum([sum([get_value(y) * model.lam[x, y] * size(y, x) for y in model.Y]) for x in model.X]) / n
 
     model.OBJ = Objective(rule=objective_function,
                           sense=pyomo.core.minimize if is_lower_bound else pyomo.core.maximize)
@@ -153,8 +130,8 @@ def evar(exponents, alpha, is_lower_bound, eps=1e-10):
     N = len(exponents)
     z = torch.nn.Parameter(torch.ones(1, dtype=torch.double) * (-1 if is_lower_bound else 1))
     helper = lambda z: (torch.logsumexp(z * exponents, 0) - np.log(N * alpha)) / z
-    if alpha == 1:
-        return exponents.mean().item()
+    # if alpha == 1:
+    #     return exponents.mean().item()
     optimizer = torch.optim.SGD([z], lr=0.0000001, maximize=is_lower_bound)
     previous = None
     # Until converged
@@ -419,23 +396,33 @@ def main():
 
 
 if __name__ == '__main__':
-    df = pd.read_csv("../csv_files/data_u72_x50_t25_y50.csv")
+    # df = pd.read_csv("../csv_files/data_u72_x50_t25_y50.csv")
     # df = pd.read_csv("../csv_files/data_u72_x50_t25_y0.csv")
     # df = pd.read_csv("../csv_files/data_u0_x16_t16_y50.csv")
-    # df = pd.read_csv("../csv_files/data_u15_x5_t38_y50.csv")
+    df = pd.read_csv("../csv_files/data_u15_x5_t38_y50.csv")
     # df = pd.read_csv("../csv_files/data_u49_x-25_t-25_y-25.csv")
-    # df = pd.read_csv("../csv_files/data_adjusted.csv")
-    rhos = np.linspace(0, 5, 15)
+    # df = pd.read_csv("../csv_files/regular_50.csv")
+    rhos = np.linspace(0, 1, 10)
+    msm_lower = []
+    msm_upper = []
     f_upper = []
     f_lower = []
     closed_f_upper = []
     closed_f_lower = []
     closed_kl_upper = []
     closed_kl_lower = []
+    msm_time = []
     f_time = []
     closed_f_time = []
     closed_kl_time = []
     for rho in tqdm(rhos):
+        start = time.time()
+        y_control, y_treated, lower_control, lower_treated, upper_control, upper_treated = bounds_creator(df,
+                                                                                                          sensitivity_model='msm',
+                                                                                                          sensitivity_measure=rho+1)
+        msm_upper.append(upper_treated - lower_control)
+        msm_lower.append(lower_treated - upper_control)
+        msm_time.append(time.time() - start)
         start = time.time()
         y_control, y_treated, lower_control, lower_treated, upper_control, upper_treated = bounds_creator(df,
                                                                                                           sensitivity_model='f',
@@ -457,6 +444,8 @@ if __name__ == '__main__':
         closed_kl_upper.append(upper)
         closed_kl_lower.append(lower)
         closed_kl_time.append(time.time() - start)
+    plt.plot(rhos, msm_upper, color='green', label='MSM')
+    plt.plot(rhos, msm_lower, color='green')
     plt.plot(rhos, closed_kl_upper, color='black', label='Closed KL')
     plt.plot(rhos, closed_kl_lower, color='black')
     plt.plot(rhos, f_upper, color='red', label='Constraint F-sensitivity')
@@ -468,6 +457,7 @@ if __name__ == '__main__':
     plt.ylabel('ATE')
     plt.title('Comparison between closed forms and constraints forms')
     plt.show()
+    plt.plot(rhos, msm_time, color='green', label='MSM')
     plt.plot(rhos, f_time, color='red', label='F-sensitivity')
     plt.plot(rhos, closed_f_time, color='blue', label='Closed F-sensitivity')
     plt.plot(rhos, closed_kl_time, color='black', label='Closed KL')
