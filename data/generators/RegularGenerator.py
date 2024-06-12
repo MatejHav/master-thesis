@@ -32,5 +32,5 @@ class RegularGenerator:
                                          *[f"X{i}" for i in range(self.size["X"])],
                                          *[f"T{i}" for i in range(self.size["T"])],
                                          *[f"Y{i}" for i in range(self.size["Y"])]])
-        df.to_csv(path, index=False)
+        df.to_csv(path, index=False, columns=df.columns)
         return df

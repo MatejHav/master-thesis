@@ -44,7 +44,7 @@ def estimate_bound(rho, lower, delta, precision=20):
     res = 0
     res_l = 0
     res_u = 0
-    n = 500
+    n = 15_000
     for x1 in np.linspace(0, 1, precision):
         for x2 in np.linspace(0, 1, precision):
             for x3 in np.linspace(0, 1, precision):
@@ -93,4 +93,5 @@ if __name__ == '__main__':
     plt.grid()
     plt.xlabel('Rho')
     plt.ylabel('ATC')
+    plt.title("Reproduction of the ATC result made by authors.")
     plt.show()

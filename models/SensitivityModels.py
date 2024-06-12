@@ -4,6 +4,7 @@ import threading
 import time
 
 import pyomo.core
+import torch
 import torch.optim
 from pyomo.core import *
 from pyomo.environ import *
@@ -50,7 +51,8 @@ def create_msm_model(data, gamma, t, is_lower_bound):
     def propensity(x_index):
         x = X.iloc[x_index]
         return \
-        propensity_scores[np.all(propensity_scores[x_features] == x[x_features], axis=1)]["propensity_score"].iloc[0]
+            propensity_scores[np.all(propensity_scores[x_features] == x[x_features], axis=1)]["propensity_score"].iloc[
+                0]
 
     def size(y_index, x_index):
         x = X.iloc[x_index]
@@ -131,7 +133,7 @@ def evar(exponents, alpha, is_lower_bound, eps=1e-6):
     #     print(f"|X={u.item()}| = {len(exponents[exponents == u.item()])}")
     N = len(exponents)
     z = torch.nn.Parameter(torch.tensor([-1.0 if is_lower_bound else 1.0], requires_grad=True, dtype=torch.double))
-    helper = lambda : (torch.logsumexp(z * exponents, 0) - np.log(N * alpha)) / z
+    helper = lambda: (torch.logsumexp(z * exponents, 0) - np.log(N * alpha)) / z
     # if alpha == 1:
     #     return exponents.mean().item()
     optimizer = torch.optim.Adam([z], lr=1e-3, maximize=is_lower_bound, weight_decay=0)
@@ -148,13 +150,15 @@ def evar(exponents, alpha, is_lower_bound, eps=1e-6):
         loss.backward()
         optimizer.step()
     return min(exponents.max().item(), helper().item()) if not is_lower_bound else \
-        max(exponents.min().item(), helper().item())
+                max(exponents.min().item(), helper().item())
+
 
 def closed_form_kl_sensitivity(data, rho, is_lower_bound):
     alpha = np.exp(-rho)
     result_treated = evar(torch.DoubleTensor(data[data["T0"] == 1]["Y0"].to_numpy()), alpha, is_lower_bound)
     result_control = evar(torch.DoubleTensor(data[data["T0"] == 0]["Y0"].to_numpy()), alpha, not is_lower_bound)
     return result_treated - result_control
+
 
 def closed_form_f_sensitivity(data, rho, is_lower_bound):
     alpha = np.exp(-rho)
@@ -187,8 +191,9 @@ def closed_form_f_sensitivity(data, rho, is_lower_bound):
         # print("\ncontrol")
         control_q = evar(exponents, alpha, not is_lower_bound)
         # print(control_q)
-        result_control += 1/r_x * control_probability_of_x[index] * control_q
+        result_control += 1 / r_x * control_probability_of_x[index] * control_q
     return result_treated - result_control
+
 
 def gaussian_mixture_model(data, rho, is_lower_bound, means, variances, k):
     x_features = list(filter(lambda c: 'X' in c, data.columns))
@@ -210,16 +215,17 @@ def gaussian_mixture_model(data, rho, is_lower_bound, means, variances, k):
         observed_propensity = selection_on_x['T0'].sum() / len(selection_on_x)
         r_x = (1 - propensity) * observed_propensity / (propensity * (1 - observed_propensity))
         # treated
-        treated_q = (-1 if is_lower_bound else 1) * np.sqrt(rho * sum(variances['treated'][x]) / (2 * k**2)) \
+        treated_q = (-1 if is_lower_bound else 1) * 0.5 * np.sqrt(rho * sum(variances['treated'][x]) / (2 * k ** 2)) \
                     + sum(means['treated'][x]) / k \
-                    + (-1 if is_lower_bound else 1) * (np.sqrt(2*rho)) / (2 * k)
+                    + (-1 if is_lower_bound else 1) * (np.sqrt(0.5 * rho)) / (2 * k)
         result_treated += r_x * treated_probability_of_x[index] * treated_q
         # control
-        control_q = (-1 if not is_lower_bound else 1) * np.sqrt(rho * sum(variances['control'][x]) / (2 * k**2)) \
+        control_q = (-1 if not is_lower_bound else 1) * 0.5 * np.sqrt(rho * sum(variances['control'][x]) / (2 * k ** 2)) \
                     + sum(means['control'][x]) / k \
-                    + (-1 if not is_lower_bound else 1) * (np.sqrt(2*rho)) / (2 * k)
+                    + (-1 if not is_lower_bound else 1) * (np.sqrt(0.5 * rho)) / (2 * k)
         result_control += 1 / r_x * control_probability_of_x[index] * control_q
     return result_treated - result_control
+
 
 def create_f_sensitivity_model(data, rho, treatment, is_lower_bound):
     # Data according to treated
@@ -257,7 +263,8 @@ def create_f_sensitivity_model(data, rho, treatment, is_lower_bound):
     def propensity(x_index):
         x = X.iloc[x_index]
         return \
-        propensity_scores[np.all(propensity_scores[x_features] == x[x_features], axis=1)]["propensity_score"].iloc[0]
+            propensity_scores[np.all(propensity_scores[x_features] == x[x_features], axis=1)]["propensity_score"].iloc[
+                0]
 
     def size(y_index, x_index):
         x = X.iloc[x_index]
@@ -273,7 +280,7 @@ def create_f_sensitivity_model(data, rho, treatment, is_lower_bound):
         return Y.iloc[y]["Y0"]
 
     def r(x):
-        return propensity(x) * (1 - p_treated) / ((1-propensity(x)) * p_treated)
+        return propensity(x) * (1 - p_treated) / max(((1 - propensity(x)) * p_treated), 1e-5)
 
     model = ConcreteModel(name="FSensitivityModel")
     model.X = RangeSet(0, x_size - 1)
@@ -283,7 +290,7 @@ def create_f_sensitivity_model(data, rho, treatment, is_lower_bound):
     # Constraint 1: Definition of R
     def r_constraint(model, x):
         if treatment == 0:
-            return (1/r(x)) == sum([model.L[x, y] * size(y, x) for y in model.Y]) / X.iloc[x]["size"]
+            return (1 / r(x)) == sum([model.L[x, y] * size(y, x) for y in model.Y]) / X.iloc[x]["size"]
         return r(x) == sum([model.L[x, y] * size(y, x) for y in model.Y]) / X.iloc[x]["size"]
 
     model.c1 = Constraint(model.X, rule=r_constraint)
@@ -291,8 +298,10 @@ def create_f_sensitivity_model(data, rho, treatment, is_lower_bound):
     # Constraint 3: MSM assumption
     def f_constraint(model, x):
         if treatment == 0:
-            return sum([log(model.L[x, y] * r(x)) * model.L[x, y] * r(x) * size(y, x) for y in model.Y]) / X.iloc[x]["size"] <= rho
-        return sum([log(model.L[x, y] / r(x)) * model.L[x, y] / r(x) * size(y, x) for y in model.Y]) / X.iloc[x]["size"] <= rho
+            return sum([log(model.L[x, y] * r(x)) * model.L[x, y] * r(x) * size(y, x) for y in model.Y]) / X.iloc[x][
+                "size"] <= rho
+        return sum([log(model.L[x, y] / r(x)) * model.L[x, y] / r(x) * size(y, x) for y in model.Y]) / X.iloc[x][
+            "size"] <= rho
 
     model.c3 = Constraint(model.X, rule=f_constraint)
 
@@ -312,6 +321,98 @@ def create_f_sensitivity_model(data, rho, treatment, is_lower_bound):
     return model.OBJ()
 
 
+def authors_algorithm(data, rho, treatment, is_lower_bound):
+    # Split into 3 subsets
+    data = data.sample(frac=1)
+    data_splits = np.array_split(data, 3)
+    bounds = [0, 0, 0]
+    eps = 0
+    x_features = list(filter(lambda c: 'X' in c, data.columns))
+    layer_size = len(x_features)
+    # For every subset of data
+    for i in range(3):
+        current_data = data_splits[i]
+        next_data = data_splits[(i + 1) % 3]
+        next_next_data = data_splits[(i + 2) % 3]
+        selected_curr_data = current_data[current_data["T0"] == treatment]
+        selected_next_data = next_data[next_data["T0"] == treatment]
+        selected_next_next_data = next_next_data[next_next_data["T0"] == treatment]
+        # Estimate r(x) based on i+1 dataset
+        p = len(next_data[next_data["T0"] == treatment]) / len(next_data)
+        X = next_data.groupby(x_features, as_index=False).size()
+        Xt = selected_next_data.groupby(x_features, as_index=False).size()
+        # Assign each sample a r(x) value
+        r = torch.nn.Sequential(torch.nn.Linear(layer_size, layer_size), torch.nn.ReLU(),
+                                torch.nn.Linear(layer_size, 1))
+        r_optim = torch.optim.Adam(r.parameters(), weight_decay=1e-3)
+        criterion = torch.nn.MSELoss()
+        for _ in range(500):
+            batch = selected_next_data.sample(frac=0.2)
+            x = torch.Tensor(batch[x_features].to_numpy())
+            selected_x = (batch[x_features].join(X, on=x_features, how='inner', lsuffix='l', rsuffix='r')[[*x_features, "size"]]).join(Xt, on=x_features, how='inner', lsuffix='l', rsuffix='r')[[*x_features, "sizel", "sizer"]]
+            propensity = torch.Tensor((selected_x["sizer"]/ selected_x["sizel"]).to_numpy())
+            r_optim.zero_grad()
+            target = (1 - propensity) * p / ((1 - p) * propensity)
+            prediction = r(x)
+            loss = criterion(prediction.squeeze(dim=-1), target)
+            loss.backward()
+            r_optim.step()
+        # Estimate the nuisance parameters using a NN
+        alpha_model = torch.nn.Sequential(torch.nn.Linear(layer_size, layer_size), torch.nn.ReLU(),
+                                          torch.nn.Linear(layer_size, 1))
+        eta_model = torch.nn.Sequential(torch.nn.Linear(layer_size, layer_size), torch.nn.ReLU(),
+                                        torch.nn.Linear(layer_size, 1))
+        alpha_optim = torch.optim.Adam(alpha_model.parameters(), weight_decay=1e-3)
+        eta_optim = torch.optim.Adam(eta_model.parameters(), weight_decay=1e-3)
+        # Do 200 steps on randomized batches from i+1 data
+        for _ in range(5_000):
+            batch = selected_next_data.sample(frac=0.2)
+            x = torch.Tensor(batch[x_features].to_numpy())
+            y = (1 if is_lower_bound else -1) * torch.Tensor(batch["Y0"].to_numpy()).unsqueeze(dim=-1)
+            alpha_optim.zero_grad()
+            eta_optim.zero_grad()
+            alpha = alpha_model(x)**2 + 0.1
+            eta = eta_model(x)
+            loss = torch.mean(alpha * torch.exp((y + eta) / (-alpha-eps) - 1) + eta + alpha * rho)
+            loss.backward()
+            alpha_optim.step()
+            eta_optim.step()
+        # Use regression to estimate H(X, Y) given X from i+2 dataset
+        regressor = torch.nn.Linear(layer_size, 1)
+        regressor_optim = torch.optim.Adam(regressor.parameters(), weight_decay=1e-3)
+        criterion = torch.nn.MSELoss()
+        for _ in range(1_000):
+            batch = selected_next_next_data.sample(frac=0.2)
+            x = torch.Tensor(batch[x_features].to_numpy())
+            y = (1 if is_lower_bound else -1) * torch.Tensor(batch["Y0"].to_numpy()).unsqueeze(dim=-1)
+            with torch.no_grad():
+                alpha = alpha_model(x)**2 + 0.1
+                eta = eta_model(x)
+            regressor_optim.zero_grad()
+            prediction = regressor(x)
+            target = alpha * torch.exp((y + eta) / (-alpha-eps) - 1) + eta + alpha * rho
+            loss = criterion(prediction, target)
+            loss.backward()
+            regressor_optim.step()
+        # Compute the expected bound using H(X,Y) and h(X)
+        x = torch.Tensor(selected_curr_data[x_features].to_numpy())
+        y = (1 if is_lower_bound else -1) * torch.Tensor(selected_curr_data["Y0"].to_numpy()).unsqueeze(dim=-1)
+        mean_regressor = torch.mean(regressor(x).detach())
+        alpha = alpha_model(x)**2 + 0.1
+        eta = eta_model(x)
+        mean_diff = torch.mean(r(x) * (alpha * torch.exp((y + eta) / (-alpha-eps) - 1) + eta + alpha * rho - regressor(x)))
+        bounds[i] = (mean_diff + mean_regressor).detach().item()
+    # Return average of the three estimated bounds
+    return -np.mean(bounds)
+
+def get_author_algorithm_bounds(data, rho):
+    mu_0_obs = data[data["T0"] == 0]["Y0"].mean()
+    mu_1_obs = data[data["T0"] == 1]["Y0"].mean()
+    mu_0_0 = authors_algorithm(data, rho, 0, False)
+    mu_0_1 = authors_algorithm(data, rho, 0, True)
+    mu_1_0 = authors_algorithm(data, rho, 1, False)
+    mu_1_1 = authors_algorithm(data, rho, 1, True)
+    return mu_1_obs - mu_1_0 + mu_0_obs - mu_0_1, mu_1_obs - mu_1_1 + mu_0_obs - mu_0_0
 
 
 def bounds_creator(data, sensitivity_model, sensitivity_measure):
@@ -432,10 +533,10 @@ def main():
 
 
 if __name__ == '__main__':
-    # df = pd.read_csv("../csv_files/data_u72_x50_t25_y50.csv")
+    df = pd.read_csv("../csv_files/data_u25_x0_t-30_y100.csv")
     # df = pd.read_csv("../csv_files/data_u72_x50_t25_y0.csv")
     # df = pd.read_csv("../csv_files/data_u0_x16_t16_y50.csv")
-    df = pd.read_csv("../csv_files/data_u15_x5_t38_y50.csv")
+    # df = pd.read_csv("../csv_files/data_u15_x5_t38_y50.csv")
     # df = pd.read_csv("../csv_files/data_u49_x-25_t-25_y-25.csv")
     # df = pd.read_csv("../csv_files/regular_50.csv")
     rhos = np.linspace(0, 3, 20)
@@ -452,13 +553,6 @@ if __name__ == '__main__':
     closed_f_time = []
     closed_kl_time = []
     for rho in tqdm(rhos):
-        # start = time.time()
-        # y_control, y_treated, lower_control, lower_treated, upper_control, upper_treated = bounds_creator(df,
-        #                                                                                                   sensitivity_model='msm',
-        #                                                                                                   sensitivity_measure=rho+1)
-        # msm_upper.append(upper_treated - lower_control)
-        # msm_lower.append(lower_treated - upper_control)
-        # msm_time.append(time.time() - start)
         start = time.time()
         y_control, y_treated, lower_control, lower_treated, upper_control, upper_treated = bounds_creator(df,
                                                                                                           sensitivity_model='f',

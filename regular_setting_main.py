@@ -8,14 +8,14 @@ plt.style.use("default")
 
 from data.generators import *
 from sensitivities import *
-from models.SensitivityModels import bounds_creator, closed_form_f_sensitivity, gaussian_mixture_model
+from models.SensitivityModels import bounds_creator, closed_form_f_sensitivity, gaussian_mixture_model, get_author_algorithm_bounds
 from sklearn.mixture import GaussianMixture
 
 c = lambda p, v: 1 - (0.5 * (v + 0.5) + 0.5 * p)
 
 
-def create_generator(u_prob, x_effect, t_effect, y_effect):
-    path = f"./csv_files/data_u{int(100 * u_prob)}_x{int(100 * x_effect)}_t{int(100 * t_effect)}_y{int(100 * y_effect)}.csv"
+def create_generator(u_prob, x_effect, t_effect, y_effect, dim=1, base_x_prob=0.45,  base_t_prob=0.5):
+    path = f"./csv_files/data_u{int(100 * u_prob)}_x{int(100 * x_effect)}_t{int(100 * t_effect)}_y{int(100 * y_effect)}_k{dim}.csv"
     if os.path.exists(path):
         df = pd.read_csv(path)
         return df, path
@@ -24,18 +24,16 @@ def create_generator(u_prob, x_effect, t_effect, y_effect):
     n_jobs = 30
     sizes = {
         "U": 1,
-        "X": 1,
+        "X": dim,
         "T": 1,
         "Y": 1
     }
-    base_x_prob = 0.45
-    base_t_prob = 0.5
 
     # Generators
     u_gen = lambda noise: [0 if np.random.rand() >= u_prob else 1]
     x_gen = lambda u, noise: [0 if np.random.rand() >= x_effect * u[0] + base_x_prob else 1 for _ in range(sizes["X"])]
-    t_gen = lambda u, x, noise: [0 if np.random.rand() >= t_effect * u[0] + 0.25 * x[0] + base_t_prob else 1]
-    y_gen = lambda u, x, t, noise: [x[0] + y_effect * u[0] + 2 * t[0] + noise]
+    t_gen = lambda u, x, noise: [0 if np.random.rand() >= t_effect * u[0] + 0.25 * sum(x)/dim + base_t_prob else 1]
+    y_gen = lambda u, x, t, noise: [round(sum(x)/dim + y_effect * u[0] + 2 * t[0] + noise, 1)]
     generators = {
         "U": u_gen,
         "X": x_gen,
@@ -99,7 +97,8 @@ def plot_setting_distribution(metric_dict, metric_name, logscale=False):
 
 def main2():
     # Generate dataset
-    df, path = create_generator(0.25, 0, -0.3, 1)
+    # df, path = create_generator(0.25, 0, -0.3, 1)
+    df, path = create_generator(0.25, 0, -0.3, 1, dim=3)
     # Generate counterfactuals and save
     # path = './csv_files/synthetic_data_random_forest.csv'
     # if not os.path.exists(path):
@@ -120,92 +119,191 @@ def main2():
     #         y1 = predictions[index][1] if t == 0 else y
     #         copy_of_data.loc[len(copy_of_data)] = [u, x, 0, round(y0, 1)]
     #         copy_of_data.loc[len(copy_of_data)] = [u, x, 1, round(y1, 1)]
-    #     copy_of_data.to_csv('./csv_files/synthetic_data_random_forest.csv')
+    #     copy_of_data.to_csv(path)
     # data = pd.read_csv('./csv_files/synthetic_data_random_forest.csv')
     data = pd.read_csv(path)
-    # Train Gaussian Mixture models
-    k = 2
-    treated_data0 = data[(data['X0'] == 0) & (data['T0'] == 1)]
-    treated_gauss0 = GaussianMixture(n_components=k, covariance_type='spherical')
-    treated_gauss0.fit(treated_data0['Y0'].to_numpy().reshape(-1, 1))
-    treated_data1 = data[(data['X0'] == 1) & (data['T0'] == 1)]
-    treated_gauss1 = GaussianMixture(n_components=k, covariance_type='spherical')
-    treated_gauss1.fit(treated_data1['Y0'].to_numpy().reshape(-1, 1))
-    control_data0 = data[(data['X0'] == 0) & (data['T0'] == 0)]
-    control_gauss0 = GaussianMixture(n_components=k, covariance_type='spherical')
-    control_gauss0.fit(control_data0['Y0'].to_numpy().reshape(-1, 1))
-    control_data1 = data[(data['X0'] == 1) & data['T0'] == 0]
-    control_gauss1 = GaussianMixture(n_components=k, covariance_type='spherical')
-    control_gauss1.fit(control_data1['Y0'].to_numpy().reshape(-1, 1))
-    means = {
-        'treated': [treated_gauss0.means_[0], treated_gauss1.means_[0]],
-        'control': [control_gauss0.means_[0], control_gauss1.means_[0]]
-    }
-    variances = {
-        'treated': [treated_gauss0.covariances_, treated_gauss1.covariances_],
-        'control': [control_gauss0.covariances_, control_gauss1.covariances_]
-    }
+    # # Train Gaussian Mixture models
+    # k = 1
+    # treated_data0 = data[(data['X0'] == 0) & (data['T0'] == 1)]
+    # treated_gauss0 = GaussianMixture(n_components=k, covariance_type='spherical')
+    # treated_gauss0.fit(treated_data0['Y0'].to_numpy().reshape(-1, 1))
+    # treated_data1 = data[(data['X0'] == 1) & (data['T0'] == 1)]
+    # treated_gauss1 = GaussianMixture(n_components=k, covariance_type='spherical')
+    # treated_gauss1.fit(treated_data1['Y0'].to_numpy().reshape(-1, 1))
+    # control_data0 = data[(data['X0'] == 0) & (data['T0'] == 0)]
+    # control_gauss0 = GaussianMixture(n_components=k, covariance_type='spherical')
+    # control_gauss0.fit(control_data0['Y0'].to_numpy().reshape(-1, 1))
+    # control_data1 = data[(data['X0'] == 1) & data['T0'] == 0]
+    # control_gauss1 = GaussianMixture(n_components=k, covariance_type='spherical')
+    # control_gauss1.fit(control_data1['Y0'].to_numpy().reshape(-1, 1))
+    # means = {
+    #     'treated': [treated_gauss0.means_[0], treated_gauss1.means_[0]],
+    #     'control': [control_gauss0.means_[0], control_gauss1.means_[0]]
+    # }
+    # variances = {
+    #     'treated': [treated_gauss0.covariances_, treated_gauss1.covariances_],
+    #     'control': [control_gauss0.covariances_, control_gauss1.covariances_]
+    # }
+    # # Generate data based on the gaussian
+    # path = './csv_files/synthetic_data_gaussian.csv'
+    # if not os.path.exists(path):
+    #     copy_of_data = pd.DataFrame([], columns=df.columns)
+    #     for index, row in df.iterrows():
+    #         u = row['U0']
+    #         x = int(row['X0'])
+    #         t = row['T0']
+    #         y = row['Y0']
+    #         y0 = np.sum(variances["control"][x] * np.random.randn(k) + means["control"][x]) if t == 1 else y
+    #         y1 = np.sum(variances["treated"][x] * np.random.randn(k) + means["treated"][x]) if t == 0 else y
+    #         copy_of_data.loc[len(copy_of_data)] = [u, x, 0, round(y0, 3)]
+    #         copy_of_data.loc[len(copy_of_data)] = [u, x, 1, round(y1, 3)]
+    #     copy_of_data.to_csv(path)
+    # data = pd.read_csv(path)
     # Compute bounds
-    rhos = np.linspace(0, 1.2, 13)
+    rhos = np.linspace(0, 1.3, 13)
     f_upper = []
     f_lower = []
     closed_f_upper = []
     closed_f_lower = []
+    author_lower = []
+    author_upper = []
+    author_lower95 = []
+    author_lower05 = []
+    author_upper95 = []
+    author_upper05 = []
     gaussian_lower = []
     gaussian_upper = []
-    for rho in tqdm(rhos):
-        # y_control, y_treated, lower_control, lower_treated, upper_control, upper_treated = bounds_creator(data,
-        #                                                                                                   sensitivity_model='f',
-        #                                                                                                   sensitivity_measure=rho)
-        # f_upper.append(round(upper_treated - lower_control, 2))
-        # f_lower.append(round(lower_treated - upper_control, 2))
-        # Closed f sensitivity
-        # lower = closed_form_f_sensitivity(data, rho, True)
-        # upper = closed_form_f_sensitivity(data, rho, False)
-        # closed_f_upper.append(round(upper, 2))
-        # closed_f_lower.append(round(lower, 2))
-        # Closed form Gaussian Mixture
-        lower = gaussian_mixture_model(data, rho, True, means, variances, k)
-        upper = gaussian_mixture_model(data, rho, False, means, variances, k)
-        gaussian_lower.append(round(lower, 2))
-        gaussian_upper.append(round(upper, 2))
-    # Show two graphs with the graphs
-    # plt.plot(rhos, f_upper, color='red')
-    # plt.plot(rhos, f_lower, color='red')
+    num_runs = 10
+    # for rho in tqdm(rhos):
+    #     lower_temp = []
+    #     upper_temp = []
+    #     for run in range(num_runs):
+    #         lower, upper = get_author_algorithm_bounds(data, rho)
+    #         upper_temp.append(upper)
+    #         lower_temp.append(lower)
+    #     author_upper.append(np.mean(upper_temp))
+    #     author_lower.append(np.mean(lower_temp))
+    #     author_lower05.append(np.quantile(lower_temp, 0.05))
+    #     author_upper05.append(np.quantile(upper_temp, 0.05))
+    #     author_lower95.append(np.quantile(lower_temp, 0.95))
+    #     author_upper95.append(np.quantile(upper_temp, 0.95))
+    #
+    # plt.plot(rhos, author_lower, color='green')
+    # plt.plot(rhos, author_upper, color='green')
+    # plt.fill_between(rhos, author_lower05, author_lower95, color='green', alpha=0.5)
+    # plt.fill_between(rhos, author_upper05, author_upper95, color='green', alpha=0.5)
     # plt.xlabel('ρ')
     # plt.ylabel('ATE')
-    # plt.title('Bound from constraint programing approach')
+    # plt.title('Bound from authors approach with a Random Forest model')
     # plt.show()
 
-    plt.plot(rhos, gaussian_upper, color='red')
-    plt.plot(rhos, gaussian_lower, color='red')
+    for rho in tqdm(rhos):
+        y_control, y_treated, lower_control, lower_treated, upper_control, upper_treated = bounds_creator(data,
+                                                                                                          sensitivity_model='f',
+                                                                                                          sensitivity_measure=rho)
+        f_upper.append(round(upper_treated - lower_control, 1))
+        f_lower.append(round(lower_treated - upper_control, 1))
+        # Closed f sensitivity
+        lower = closed_form_f_sensitivity(data, rho, True)
+        upper = closed_form_f_sensitivity(data, rho, False)
+        closed_f_upper.append(round(upper, 2))
+        closed_f_lower.append(round(lower, 2))
+        # # Closed form Gaussian Mixture
+        # lower = gaussian_mixture_model(data, rho, True, means, variances, k)
+        # upper = gaussian_mixture_model(data, rho, False, means, variances, k)
+        # gaussian_lower.append(round(lower, 2))
+        # gaussian_upper.append(round(upper, 2))
+    # # Show two graphs with the graphs
+    plt.plot(rhos, f_upper, color='red')
+    plt.plot(rhos, f_lower, color='red')
     plt.xlabel('ρ')
     plt.ylabel('ATE')
-    plt.title('Bound from closed form approach with a Gaussian mixture model')
+    plt.title('Bound from constraint programing approach')
     plt.show()
-
-    # plt.plot(rhos, closed_f_upper, color='blue')
-    # plt.plot(rhos, closed_f_lower, color='blue')
+    # #
+    plt.plot(rhos, closed_f_upper, color='blue')
+    plt.plot(rhos, closed_f_lower, color='blue')
+    plt.xlabel('ρ')
+    plt.ylabel('ATE')
+    plt.title('Bound from gradient descent approach with a Random Forest model')
+    # plt.title('Bound from gradient descent approach with a Gaussian Mixture model')
+    plt.show()
+    # #
+    # plt.plot(rhos, author_lower, color='green')
+    # plt.plot(rhos, author_upper, color='green')
     # plt.xlabel('ρ')
     # plt.ylabel('ATE')
-    # plt.title('Bound from gradient descent approach with a Gaussian mixture model')
+    # plt.title('Bound from authors approach with a Random Forest model')
     # plt.show()
-    # Print out results into a table
+    #
+    # # plt.plot(rhos, gaussian_upper, color='red')
+    # # plt.plot(rhos, gaussian_lower, color='red')
+    # # plt.xlabel('ρ')
+    # # plt.ylabel('ATE')
+    # # plt.title('Bound from closed form approach with a Gaussian mixture model')
+    # # plt.show()
+    # # Print out results into a table
+    # # print(f"""
+    # # \\(\\rho\\)&  0 & 0.1 & 0.2 & 0.3 & 0.4 & 0.5 & 0.6 & 0.7 & 0.8 & 0.9 & 1 & 1.1 & 1.2\\\\
+    # #          \hline
+    # #          CF Upper & {'&'.join(list(map(str,gaussian_upper)))} \\\\
+    # #          \hline
+    # #          CF Lower & {'&'.join(list(map(str,gaussian_lower)))} \\\\
+    # #          \hline
+    # #          GD Upper & {'&'.join(list(map(str,closed_f_upper)))}\\\\
+    # #          \hline
+    # #          GD Lower & {'&'.join(list(map(str,closed_f_lower)))}
+    # # """)
+
+
+def main3():
+    rhos = np.linspace(0, 1, 3)
+    ps = [0.05, 0.15, 0.95]
+    xs = [0.05, 0.15, 0.95]
+    ts = [-0.25, 0.05, 0.15]
+    ys = [-0.5, -0.25, 0.05, 0.15, 0.95]
+    bar = tqdm(range(len(ps) * len(xs) * len(ts) * len(ys)))
+    res = np.zeros((4, 5))
+    for i_p, p in enumerate(ps):
+        for i_x, x_effect in enumerate(xs):
+            for i_t, t_effect in enumerate(ts):
+                for i_y, y_effect in enumerate(ys):
+                    data, _ = create_generator(p, x_effect, t_effect, y_effect, dim=1, base_x_prob=0, base_t_prob=0.5)
+                    differences = []
+                    for rho in rhos:
+                        _, _, lower_control, lower_treated, upper_control, upper_treated = bounds_creator(
+                            data,
+                            sensitivity_model='f',
+                            sensitivity_measure=rho)
+                        cp_upper = upper_treated - lower_control
+                        cp_lower = lower_treated - upper_control
+                        # Gradient Descent f sensitivity
+                        gd_lower = closed_form_f_sensitivity(data, rho, True)
+                        gd_upper = closed_form_f_sensitivity(data, rho, False)
+                        differences.append(abs(cp_upper - gd_upper))
+                        differences.append(abs(cp_lower - gd_lower))
+                    max_diff = max(differences)
+                    # Probability of U
+                    res[0, i_p+2] = round(max(max_diff, res[0, i_p+2]), 3)
+                    # Probability of X
+                    res[1, i_x+2] = round(max(max_diff, res[1, i_x+2]), 3)
+                    # Probability of T
+                    res[2, i_t+1] = round(max(max_diff, res[2, i_t+1]), 3)
+                    # Outcome
+                    res[3, i_y] = round(max(max_diff, res[3, i_y]), 3)
+                    bar.update()
     print(f"""
-    \\(\\rho\\)&  0 & 0.1 & 0.2 & 0.3 & 0.4 & 0.5 & 0.6 & 0.7 & 0.8 & 0.9 & 1 & 1.1 & 1.2\\\\
-             \hline
-             CF Upper & {'&'.join(list(map(str,gaussian_upper)))} \\\\
-             \hline
-             CF Lower & {'&'.join(list(map(str,gaussian_lower)))} \\\\
-             \hline
-             GD Upper & {'&'.join(list(map(str,closed_f_upper)))}\\\\
-             \hline
-             GD Lower & {'&'.join(list(map(str,closed_f_lower)))}
+    & -0.5 & -0.25 & 0.01 & 0.5 & 0.99 \\
+     u_p & - & - & {res[0, 2]} & {res[0, 3]} & {res[0, 4]}\\
+     x_u & - & - & {res[1, 2]} & {res[1, 3]} & {res[1, 4]}\\
+     t_u & - & {res[2, 1]} & {res[2, 2]} & {res[2, 3]} & -\\
+     y_u & {res[3, 0]} & {res[3, 1]} & {res[3, 2]} & {res[3, 3]} & {res[3, 4]}\\
     """)
 
 
 if __name__ == '__main__':
-    main2()
+    # main2()
+    main3()
     # rosenbaum = RosenbaumSensitivityModel("Rosenbaum Sensitivity Model")
     # rosenbaum_metrics = {}
     # msm = MarginalSensitivityModel("Marginal Sensitivity Model")
