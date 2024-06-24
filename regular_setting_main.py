@@ -20,7 +20,7 @@ def create_generator(u_prob, x_effect, t_effect, y_effect, dim=1, base_x_prob=0.
         df = pd.read_csv(path)
         return df, path
     # General settings
-    n_rows = 30_000
+    n_rows = 3_000_000
     n_jobs = 30
     sizes = {
         "U": 1,
@@ -100,7 +100,7 @@ def main2():
     # df, path = create_generator(0.25, 0, -0.3, 1)
     df, path = create_generator(0.25, 0, -0.3, 1, dim=3)
     # Generate counterfactuals and save
-    # path = './csv_files/synthetic_data_random_forest.csv'
+    # path = './csv_files/synthetic_data_random_forest_dim3.csv'
     # if not os.path.exists(path):
     #     # Train Random Forest
     #     X = df['X0'].to_numpy().reshape(-1, 1)
@@ -120,7 +120,7 @@ def main2():
     #         copy_of_data.loc[len(copy_of_data)] = [u, x, 0, round(y0, 1)]
     #         copy_of_data.loc[len(copy_of_data)] = [u, x, 1, round(y1, 1)]
     #     copy_of_data.to_csv(path)
-    # data = pd.read_csv('./csv_files/synthetic_data_random_forest.csv')
+    # # data = pd.read_csv('./csv_files/synthetic_data_random_forest.csv')
     data = pd.read_csv(path)
     # # Train Gaussian Mixture models
     # k = 1
@@ -144,7 +144,7 @@ def main2():
     #     'treated': [treated_gauss0.covariances_, treated_gauss1.covariances_],
     #     'control': [control_gauss0.covariances_, control_gauss1.covariances_]
     # }
-    # # Generate data based on the gaussian
+    # Generate data based on the gaussian
     # path = './csv_files/synthetic_data_gaussian.csv'
     # if not os.path.exists(path):
     #     copy_of_data = pd.DataFrame([], columns=df.columns)
@@ -173,7 +173,7 @@ def main2():
     author_upper05 = []
     gaussian_lower = []
     gaussian_upper = []
-    num_runs = 10
+    # num_runs = 10
     # for rho in tqdm(rhos):
     #     lower_temp = []
     #     upper_temp = []
@@ -220,12 +220,12 @@ def main2():
     plt.ylabel('ATE')
     plt.title('Bound from constraint programing approach')
     plt.show()
-    # #
+    #
     plt.plot(rhos, closed_f_upper, color='blue')
     plt.plot(rhos, closed_f_lower, color='blue')
     plt.xlabel('ρ')
     plt.ylabel('ATE')
-    plt.title('Bound from gradient descent approach with a Random Forest model')
+    plt.title('Bound from EVaR approach')
     # plt.title('Bound from gradient descent approach with a Gaussian Mixture model')
     plt.show()
     # #
@@ -236,24 +236,27 @@ def main2():
     # plt.title('Bound from authors approach with a Random Forest model')
     # plt.show()
     #
-    # # plt.plot(rhos, gaussian_upper, color='red')
-    # # plt.plot(rhos, gaussian_lower, color='red')
-    # # plt.xlabel('ρ')
-    # # plt.ylabel('ATE')
-    # # plt.title('Bound from closed form approach with a Gaussian mixture model')
-    # # plt.show()
-    # # Print out results into a table
-    # # print(f"""
-    # # \\(\\rho\\)&  0 & 0.1 & 0.2 & 0.3 & 0.4 & 0.5 & 0.6 & 0.7 & 0.8 & 0.9 & 1 & 1.1 & 1.2\\\\
-    # #          \hline
-    # #          CF Upper & {'&'.join(list(map(str,gaussian_upper)))} \\\\
-    # #          \hline
-    # #          CF Lower & {'&'.join(list(map(str,gaussian_lower)))} \\\\
-    # #          \hline
-    # #          GD Upper & {'&'.join(list(map(str,closed_f_upper)))}\\\\
-    # #          \hline
-    # #          GD Lower & {'&'.join(list(map(str,closed_f_lower)))}
-    # # """)
+    # plt.plot(rhos, gaussian_upper, color='red', label="Closed Form")
+    # plt.plot(rhos, gaussian_lower, color='red')
+    # plt.plot(rhos, closed_f_upper, color='blue', label="EVaR approach")
+    # plt.plot(rhos, closed_f_lower, color='blue')
+    # plt.xlabel('ρ')
+    # plt.ylabel('ATE')
+    # plt.legend()
+    # plt.title('Bound from closed form and EVaR approaches using random forest')
+    # plt.show()
+    # # # Print out results into a table
+    # # # print(f"""
+    # # # \\(\\rho\\)&  0 & 0.1 & 0.2 & 0.3 & 0.4 & 0.5 & 0.6 & 0.7 & 0.8 & 0.9 & 1 & 1.1 & 1.2\\\\
+    # # #          \hline
+    # # #          CF Upper & {'&'.join(list(map(str,gaussian_upper)))} \\\\
+    # # #          \hline
+    # # #          CF Lower & {'&'.join(list(map(str,gaussian_lower)))} \\\\
+    # # #          \hline
+    # # #          GD Upper & {'&'.join(list(map(str,closed_f_upper)))}\\\\
+    # # #          \hline
+    # # #          GD Lower & {'&'.join(list(map(str,closed_f_lower)))}
+    # # # """)
 
 
 def main3():
@@ -302,8 +305,8 @@ def main3():
 
 
 if __name__ == '__main__':
-    # main2()
-    main3()
+    main2()
+    # main3()
     # rosenbaum = RosenbaumSensitivityModel("Rosenbaum Sensitivity Model")
     # rosenbaum_metrics = {}
     # msm = MarginalSensitivityModel("Marginal Sensitivity Model")

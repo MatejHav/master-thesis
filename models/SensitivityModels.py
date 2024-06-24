@@ -326,7 +326,7 @@ def authors_algorithm(data, rho, treatment, is_lower_bound):
     data = data.sample(frac=1)
     data_splits = np.array_split(data, 3)
     bounds = [0, 0, 0]
-    eps = 0
+    eps = 1e-7
     x_features = list(filter(lambda c: 'X' in c, data.columns))
     layer_size = len(x_features)
     # For every subset of data
@@ -334,22 +334,24 @@ def authors_algorithm(data, rho, treatment, is_lower_bound):
         current_data = data_splits[i]
         next_data = data_splits[(i + 1) % 3]
         next_next_data = data_splits[(i + 2) % 3]
-        selected_curr_data = current_data[current_data["T0"] == treatment]
-        selected_next_data = next_data[next_data["T0"] == treatment]
-        selected_next_next_data = next_next_data[next_next_data["T0"] == treatment]
+        selected_curr_data0 = current_data[current_data["T0"] == 0]
+        selected_curr_data1 = current_data[current_data["T0"] == 1]
+        selected_next_data0 = next_data[next_data["T0"] == 0]
+        selected_next_data1 = next_data[next_data["T0"] == 1]
+        selected_next_next_data0 = next_next_data[next_next_data["T0"] == 0]
+        selected_next_next_data1 = next_next_data[next_next_data["T0"] == 1]
         # Estimate r(x) based on i+1 dataset
         p = len(next_data[next_data["T0"] == treatment]) / len(next_data)
         X = next_data.groupby(x_features, as_index=False).size()
-        Xt = selected_next_data.groupby(x_features, as_index=False).size()
+        Xt = current_data[current_data["T0"] == treatment].groupby(x_features, as_index=False).size()
         # Assign each sample a r(x) value
-        r = torch.nn.Sequential(torch.nn.Linear(layer_size, layer_size), torch.nn.ReLU(),
-                                torch.nn.Linear(layer_size, 1))
+        r = torch.nn.Linear(layer_size, 1)
         r_optim = torch.optim.Adam(r.parameters(), weight_decay=1e-3)
         criterion = torch.nn.MSELoss()
         for _ in range(500):
-            batch = selected_next_data.sample(frac=0.2)
+            batch = next_data.sample(frac=0.2)
             x = torch.Tensor(batch[x_features].to_numpy())
-            selected_x = (batch[x_features].join(X, on=x_features, how='inner', lsuffix='l', rsuffix='r')[[*x_features, "size"]]).join(Xt, on=x_features, how='inner', lsuffix='l', rsuffix='r')[[*x_features, "sizel", "sizer"]]
+            selected_x = pd.merge(pd.merge(batch[x_features], X, on=x_features, how='inner', suffixes=('l', 'r'))[[*x_features, "size"]], Xt, on=x_features, how='inner', suffixes=('l', 'r'))[[*x_features, "sizel", "sizer"]]
             propensity = torch.Tensor((selected_x["sizer"]/ selected_x["sizel"]).to_numpy())
             r_optim.zero_grad()
             target = (1 - propensity) * p / ((1 - p) * propensity)
@@ -358,31 +360,31 @@ def authors_algorithm(data, rho, treatment, is_lower_bound):
             loss.backward()
             r_optim.step()
         # Estimate the nuisance parameters using a NN
-        alpha_model = torch.nn.Sequential(torch.nn.Linear(layer_size, layer_size), torch.nn.ReLU(),
-                                          torch.nn.Linear(layer_size, 1))
-        eta_model = torch.nn.Sequential(torch.nn.Linear(layer_size, layer_size), torch.nn.ReLU(),
-                                        torch.nn.Linear(layer_size, 1))
-        alpha_optim = torch.optim.Adam(alpha_model.parameters(), weight_decay=1e-3)
-        eta_optim = torch.optim.Adam(eta_model.parameters(), weight_decay=1e-3)
+        alpha_model = torch.nn.Linear(layer_size, 1)
+        alpha_model.weight = torch.nn.Parameter(torch.ones_like(alpha_model.weight))
+        alpha_model.bias = torch.nn.Parameter(torch.ones_like(alpha_model.weight))
+        eta_model = torch.nn.Linear(layer_size, 1)
+        params = list(alpha_model.parameters())
+        params.extend(list(eta_model.parameters()))
+        optimizer = torch.optim.Adam(params, weight_decay=0)
+        # eta_optim = torch.optim.Adam(eta_model.parameters(), weight_decay=0)
         # Do 200 steps on randomized batches from i+1 data
-        for _ in range(5_000):
-            batch = selected_next_data.sample(frac=0.2)
+        for _ in range(20_000):
+            batch = selected_next_data1.sample(frac=1) if treatment == 0 else selected_next_data0.sample(frac=1)
             x = torch.Tensor(batch[x_features].to_numpy())
             y = (1 if is_lower_bound else -1) * torch.Tensor(batch["Y0"].to_numpy()).unsqueeze(dim=-1)
-            alpha_optim.zero_grad()
-            eta_optim.zero_grad()
+            optimizer.zero_grad()
             alpha = alpha_model(x)**2 + 0.1
             eta = eta_model(x)
             loss = torch.mean(alpha * torch.exp((y + eta) / (-alpha-eps) - 1) + eta + alpha * rho)
             loss.backward()
-            alpha_optim.step()
-            eta_optim.step()
+            optimizer.step()
         # Use regression to estimate H(X, Y) given X from i+2 dataset
         regressor = torch.nn.Linear(layer_size, 1)
         regressor_optim = torch.optim.Adam(regressor.parameters(), weight_decay=1e-3)
         criterion = torch.nn.MSELoss()
         for _ in range(1_000):
-            batch = selected_next_next_data.sample(frac=0.2)
+            batch = selected_next_next_data1.sample(frac=1) if treatment == 0 else selected_next_next_data0.sample(frac=1)
             x = torch.Tensor(batch[x_features].to_numpy())
             y = (1 if is_lower_bound else -1) * torch.Tensor(batch["Y0"].to_numpy()).unsqueeze(dim=-1)
             with torch.no_grad():
@@ -395,24 +397,24 @@ def authors_algorithm(data, rho, treatment, is_lower_bound):
             loss.backward()
             regressor_optim.step()
         # Compute the expected bound using H(X,Y) and h(X)
-        x = torch.Tensor(selected_curr_data[x_features].to_numpy())
-        y = (1 if is_lower_bound else -1) * torch.Tensor(selected_curr_data["Y0"].to_numpy()).unsqueeze(dim=-1)
-        mean_regressor = torch.mean(regressor(x).detach())
-        alpha = alpha_model(x)**2 + 0.1
-        eta = eta_model(x)
-        mean_diff = torch.mean(r(x) * (alpha * torch.exp((y + eta) / (-alpha-eps) - 1) + eta + alpha * rho - regressor(x)))
+        dataset = selected_curr_data1 if treatment == 0 else selected_curr_data0
+        x0 = torch.Tensor(selected_curr_data0[x_features].to_numpy())
+        x1 = torch.Tensor(selected_curr_data1[x_features].to_numpy())
+        y = (1 if is_lower_bound else -1) * torch.Tensor(dataset["Y0"].to_numpy()).unsqueeze(dim=-1)
+        mean_regressor = torch.mean(regressor(x0 if treatment == 0 else x1).detach())
+        alpha = alpha_model(x1 if treatment == 0 else x0)**2 + 0.1
+        eta = eta_model(x1 if treatment == 0 else x0)
+        mean_diff = torch.mean(r(x1 if treatment == 0 else x0) * (alpha * torch.exp((y + eta) / (-alpha-eps) - 1) + eta + alpha * rho - regressor(x1 if treatment == 0 else x0)))
         bounds[i] = (mean_diff + mean_regressor).detach().item()
     # Return average of the three estimated bounds
-    return -np.mean(bounds)
+    return (-1 if is_lower_bound else 1)*np.mean(bounds)
 
 def get_author_algorithm_bounds(data, rho):
-    mu_0_obs = data[data["T0"] == 0]["Y0"].mean()
-    mu_1_obs = data[data["T0"] == 1]["Y0"].mean()
-    mu_0_0 = authors_algorithm(data, rho, 0, False)
-    mu_0_1 = authors_algorithm(data, rho, 0, True)
-    mu_1_0 = authors_algorithm(data, rho, 1, False)
-    mu_1_1 = authors_algorithm(data, rho, 1, True)
-    return mu_1_obs - mu_1_0 + mu_0_obs - mu_0_1, mu_1_obs - mu_1_1 + mu_0_obs - mu_0_0
+    mu_0_1_l = authors_algorithm(data, rho, 0, True)
+    mu_0_1_u = authors_algorithm(data, rho, 0, False)
+    mu_1_0_l = authors_algorithm(data, rho, 1, True)
+    mu_1_0_u = authors_algorithm(data, rho, 1, False)
+    return mu_0_1_l - mu_1_0_u, mu_0_1_u - mu_1_0_l
 
 
 def bounds_creator(data, sensitivity_model, sensitivity_measure):
